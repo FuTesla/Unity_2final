@@ -173,6 +173,11 @@ public static class Toon2DSceneBuilder
         outline.normalThreshold = 0.18f;
         outline.strength = 0.85f;
 
+        var pixelate = cameraObject.AddComponent<ToonPixelatePostProcess>();
+        pixelate.referenceHeight = 300;
+        pixelate.colorSteps = 40f;
+        pixelate.ditherStrength = 0.012f;
+
         cameraObject.AddComponent<AudioListener>();
     }
 

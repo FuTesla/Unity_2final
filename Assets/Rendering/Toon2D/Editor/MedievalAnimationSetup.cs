@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
@@ -10,9 +9,8 @@ using UnityEngine;
 public static class MedievalAnimationSetup
 {
     private const string ControllerPath = "Assets/Gameplay/AnimationControllers/AC_Medieval_Player.controller";
-    private const string ClipFolder = "Assets/Gameplay/AnimationClips";
-    private const string CharacterPath = "Assets/Art/Female_Character/Humanoid Rigs/Individual Characters/FBX/Medieval.fbx";
     private const string AnimationsPath = "Assets/Art/Female_Character/Individual Characters/FBX/Medieval.fbx";
+    private const string EnemyModelPath = "Assets/Art/Female_Character/Individual Characters/FBX/Enemy_Suit.fbx";
 
     static MedievalAnimationSetup()
     {
@@ -27,17 +25,21 @@ public static class MedievalAnimationSetup
 
     public static void EnsureController()
     {
+        if (Application.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            return;
+        }
+
         EnsureFolder("Assets/Gameplay/AnimationControllers");
         ConfigureGenericImporters();
 
-        var existingController = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
-        if (existingController != null && UsesGeneratedLocomotionClips(existingController))
+        if (ControllerIsReady(AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath)))
         {
             MedievalSceneBindingSetup.BindOpenScene();
             return;
         }
 
-        if (existingController != null)
+        if (AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath) != null)
         {
             AssetDatabase.DeleteAsset(ControllerPath);
         }
@@ -61,19 +63,31 @@ public static class MedievalAnimationSetup
 
     private static void CreateController()
     {
-        AnimationClip idle;
-        AnimationClip walk;
-        AnimationClip run;
+        var importedClips = AssetDatabase.LoadAllAssetRepresentationsAtPath(AnimationsPath)
+            .OfType<AnimationClip>()
+            .Where(clip => clip != null && !clip.name.StartsWith("__", StringComparison.Ordinal))
+            .ToArray();
 
-        var proceduralClips = CreateProceduralLocomotionClips();
-        idle = proceduralClips[0];
-        walk = proceduralClips[1];
-        run = proceduralClips[2];
+        var idle = FindClip(importedClips, "CharacterArmature|Idle", "Idle_Neutral", "Idle") ?? importedClips.FirstOrDefault();
+        var walk = FindClip(importedClips, "CharacterArmature|Walk", "Walk") ?? idle;
+        var run = FindClip(importedClips, "CharacterArmature|Run", "Run") ?? walk;
+        var swordSlash = FindClip(importedClips, "CharacterArmature|Sword_Slash", "Sword_Slash", "Slash", "Attack");
+        var death = FindClip(importedClips, "CharacterArmature|Death", "Death", "Die", "Dead");
+        var wave = FindClip(importedClips, "CharacterArmature|Wave", "Wave", "Interact");
+
+        if (idle == null || walk == null || run == null || swordSlash == null || death == null || wave == null)
+        {
+            Debug.LogError($"Could not find Idle/Walk/Run/Sword Slash/Death/Wave clips in {AnimationsPath}.");
+            return;
+        }
 
         var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
         controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
         controller.AddParameter("IsMoving", AnimatorControllerParameterType.Bool);
         controller.AddParameter("IsRunning", AnimatorControllerParameterType.Bool);
+        controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("Death", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("Interact", AnimatorControllerParameterType.Trigger);
 
         var blendTree = new BlendTree
         {
@@ -94,6 +108,47 @@ public static class MedievalAnimationSetup
         locomotion.writeDefaultValues = true;
         stateMachine.defaultState = locomotion;
 
+        var attack = stateMachine.AddState("Sword Slash");
+        attack.motion = swordSlash;
+        attack.writeDefaultValues = true;
+        attack.speed = 1.05f;
+
+        var enterAttack = stateMachine.AddAnyStateTransition(attack);
+        enterAttack.hasExitTime = false;
+        enterAttack.duration = 0.05f;
+        enterAttack.canTransitionToSelf = false;
+        enterAttack.AddCondition(AnimatorConditionMode.If, 0f, "Attack");
+
+        var exitAttack = attack.AddTransition(locomotion);
+        exitAttack.hasExitTime = true;
+        exitAttack.exitTime = 0.85f;
+        exitAttack.duration = 0.08f;
+
+        var waveState = stateMachine.AddState("Wave");
+        waveState.motion = wave;
+        waveState.writeDefaultValues = true;
+
+        var enterWave = stateMachine.AddAnyStateTransition(waveState);
+        enterWave.hasExitTime = false;
+        enterWave.duration = 0.06f;
+        enterWave.canTransitionToSelf = false;
+        enterWave.AddCondition(AnimatorConditionMode.If, 0f, "Interact");
+
+        var exitWave = waveState.AddTransition(locomotion);
+        exitWave.hasExitTime = true;
+        exitWave.exitTime = 0.9f;
+        exitWave.duration = 0.1f;
+
+        var deathState = stateMachine.AddState("Death");
+        deathState.motion = death;
+        deathState.writeDefaultValues = true;
+
+        var enterDeath = stateMachine.AddAnyStateTransition(deathState);
+        enterDeath.hasExitTime = false;
+        enterDeath.duration = 0.05f;
+        enterDeath.canTransitionToSelf = false;
+        enterDeath.AddCondition(AnimatorConditionMode.If, 0f, "Death");
+
         var layers = controller.layers;
         layers[0].defaultWeight = 1f;
         controller.layers = layers;
@@ -101,244 +156,67 @@ public static class MedievalAnimationSetup
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         MedievalSceneBindingSetup.BindOpenScene();
-        Debug.Log($"Created {ControllerPath} using stylized procedural Idle/Walk/Run clips for Medieval.");
-    }
-
-    private static AnimationClip[] CreateProceduralLocomotionClips()
-    {
-        EnsureFolder(ClipFolder);
-
-        var medieval = GameObject.Find("Medieval");
-        var animator = medieval != null ? medieval.GetComponentInChildren<Animator>() : null;
-        var root = animator != null ? animator.transform : medieval != null ? medieval.transform : null;
-        var paths = BuildBonePaths(root);
-
-        var idle = CreateOrReplaceClip($"{ClipFolder}/Medieval_Idle_Procedural.anim", "Medieval_Idle_Procedural", 1.6f);
-        AddSineCurve(idle, paths, "Chest", "localEulerAnglesRaw.z", 0f, 2f, 1.6f);
-        AddSineCurve(idle, paths, "UpperArm.L", "localEulerAnglesRaw.x", 0f, 3f, 1.6f);
-        AddSineCurve(idle, paths, "UpperArm.R", "localEulerAnglesRaw.x", 0f, -3f, 1.6f);
-        AddCycleCurve(idle, paths, "UpperArm.L", "localEulerAnglesRaw.z", -78f, -78f, -78f, 1.6f);
-        AddCycleCurve(idle, paths, "UpperArm.R", "localEulerAnglesRaw.z", 78f, 78f, 78f, 1.6f);
-        AddCycleCurve(idle, paths, "LowerArm.L", "localEulerAnglesRaw.z", -8f, -8f, -8f, 1.6f);
-        AddCycleCurve(idle, paths, "LowerArm.R", "localEulerAnglesRaw.z", 8f, 8f, 8f, 1.6f);
-        SaveClip(idle);
-
-        var walk = CreateOrReplaceClip($"{ClipFolder}/Medieval_Walk_Procedural.anim", "Medieval_Walk_Procedural", 0.8f);
-        AddStrideCurves(walk, paths, 0.8f, 34f, 42f, 32f, 78f);
-        SaveClip(walk);
-
-        var run = CreateOrReplaceClip($"{ClipFolder}/Medieval_Run_Procedural.anim", "Medieval_Run_Procedural", 0.55f);
-        AddStrideCurves(run, paths, 0.55f, 48f, 58f, 44f, 82f);
-        SaveClip(run);
-
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-        return new[] { idle, walk, run };
-    }
-
-    private static Dictionary<string, string> BuildBonePaths(Transform root)
-    {
-        var paths = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (root == null)
-        {
-            AddFallbackPaths(paths);
-            return paths;
-        }
-
-        foreach (var boneName in new[]
-        {
-            "Chest", "UpperArm.L", "UpperArm.R", "LowerArm.L", "LowerArm.R",
-            "UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R"
-        })
-        {
-            var bone = FindDescendant(root, boneName);
-            if (bone != null)
-            {
-                paths[boneName] = AnimationUtility.CalculateTransformPath(bone, root);
-            }
-        }
-
-        AddFallbackPaths(paths);
-        return paths;
-    }
-
-    private static void AddFallbackPaths(Dictionary<string, string> paths)
-    {
-        AddFallbackPath(paths, "Chest", "CharacterArmature/Hips/Abdomen/Torso/Chest");
-        AddFallbackPath(paths, "UpperArm.L", "CharacterArmature/Hips/Abdomen/Torso/Chest/Shoulder.L/UpperArm.L");
-        AddFallbackPath(paths, "UpperArm.R", "CharacterArmature/Hips/Abdomen/Torso/Chest/Shoulder.R/UpperArm.R");
-        AddFallbackPath(paths, "LowerArm.L", "CharacterArmature/Hips/Abdomen/Torso/Chest/Shoulder.L/UpperArm.L/LowerArm.L");
-        AddFallbackPath(paths, "LowerArm.R", "CharacterArmature/Hips/Abdomen/Torso/Chest/Shoulder.R/UpperArm.R/LowerArm.R");
-        AddFallbackPath(paths, "UpperLeg.L", "CharacterArmature/Hips/UpperLeg.L");
-        AddFallbackPath(paths, "UpperLeg.R", "CharacterArmature/Hips/UpperLeg.R");
-        AddFallbackPath(paths, "LowerLeg.L", "CharacterArmature/Hips/UpperLeg.L/LowerLeg.L");
-        AddFallbackPath(paths, "LowerLeg.R", "CharacterArmature/Hips/UpperLeg.R/LowerLeg.R");
-    }
-
-    private static void AddFallbackPath(Dictionary<string, string> paths, string boneName, string path)
-    {
-        if (!paths.ContainsKey(boneName))
-        {
-            paths.Add(boneName, path);
-        }
-    }
-
-    private static Transform FindDescendant(Transform root, string name)
-    {
-        if (root.name == name)
-        {
-            return root;
-        }
-
-        foreach (Transform child in root)
-        {
-            var match = FindDescendant(child, name);
-            if (match != null)
-            {
-                return match;
-            }
-        }
-
-        return null;
-    }
-
-    private static AnimationClip CreateOrReplaceClip(string path, string clipName, float length)
-    {
-        if (AssetDatabase.LoadAssetAtPath<AnimationClip>(path) != null)
-        {
-            AssetDatabase.DeleteAsset(path);
-        }
-
-        var clip = new AnimationClip
-        {
-            name = clipName,
-            frameRate = 30f,
-            wrapMode = WrapMode.Loop
-        };
-
-        AssetDatabase.CreateAsset(clip, path);
-        return clip;
-    }
-
-    private static void AddStrideCurves(AnimationClip clip, Dictionary<string, string> paths, float length, float legSwing, float kneeBend, float armSwing, float armDown)
-    {
-        AddCycleCurve(clip, paths, "UpperLeg.L", "localEulerAnglesRaw.x", legSwing, -legSwing, legSwing, length);
-        AddCycleCurve(clip, paths, "UpperLeg.R", "localEulerAnglesRaw.x", -legSwing, legSwing, -legSwing, length);
-        AddCycleCurve(clip, paths, "LowerLeg.L", "localEulerAnglesRaw.x", 0f, kneeBend, 0f, length);
-        AddCycleCurve(clip, paths, "LowerLeg.R", "localEulerAnglesRaw.x", kneeBend, 0f, kneeBend, length);
-        AddCycleCurve(clip, paths, "UpperArm.L", "localEulerAnglesRaw.x", -armSwing, armSwing, -armSwing, length);
-        AddCycleCurve(clip, paths, "UpperArm.R", "localEulerAnglesRaw.x", armSwing, -armSwing, armSwing, length);
-        AddCycleCurve(clip, paths, "UpperArm.L", "localEulerAnglesRaw.z", -armDown, -armDown, -armDown, length);
-        AddCycleCurve(clip, paths, "UpperArm.R", "localEulerAnglesRaw.z", armDown, armDown, armDown, length);
-        AddCycleCurve(clip, paths, "LowerArm.L", "localEulerAnglesRaw.x", -8f, 18f, -8f, length);
-        AddCycleCurve(clip, paths, "LowerArm.R", "localEulerAnglesRaw.x", 18f, -8f, 18f, length);
-        AddCycleCurve(clip, paths, "LowerArm.L", "localEulerAnglesRaw.z", -12f, -18f, -12f, length);
-        AddCycleCurve(clip, paths, "LowerArm.R", "localEulerAnglesRaw.z", 18f, 12f, 18f, length);
-    }
-
-    private static void AddCycleCurve(AnimationClip clip, Dictionary<string, string> paths, string boneName, string propertyName, float a, float b, float c, float length)
-    {
-        if (!paths.TryGetValue(boneName, out var path))
-        {
-            return;
-        }
-
-        var curve = new AnimationCurve(
-            new Keyframe(0f, a),
-            new Keyframe(length * 0.5f, b),
-            new Keyframe(length, c));
-        SetCurveLoopTangents(curve);
-        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(path, typeof(Transform), propertyName), curve);
-    }
-
-    private static void AddSineCurve(AnimationClip clip, Dictionary<string, string> paths, string boneName, string propertyName, float center, float amplitude, float length)
-    {
-        AddCycleCurve(clip, paths, boneName, propertyName, center - amplitude, center + amplitude, center - amplitude, length);
-    }
-
-    private static void SaveClip(AnimationClip clip)
-    {
-        var settings = AnimationUtility.GetAnimationClipSettings(clip);
-        settings.loopTime = true;
-        AnimationUtility.SetAnimationClipSettings(clip, settings);
-        EditorUtility.SetDirty(clip);
-    }
-
-    private static void SetCurveLoopTangents(AnimationCurve curve)
-    {
-        for (var i = 0; i < curve.length; i++)
-        {
-            AnimationUtility.SetKeyLeftTangentMode(curve, i, AnimationUtility.TangentMode.Auto);
-            AnimationUtility.SetKeyRightTangentMode(curve, i, AnimationUtility.TangentMode.Auto);
-        }
+        Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', Death='{death.name}', Wave='{wave.name}'.");
     }
 
     private static void ConfigureGenericImporters()
     {
-        var characterImporter = AssetImporter.GetAtPath(CharacterPath) as ModelImporter;
-        if (characterImporter == null)
-        {
-            Debug.LogWarning($"Could not find Medieval character importer at {CharacterPath}.");
-            return;
-        }
+        ConfigureModelImporter(EnemyModelPath, false, "enemy animation target");
+        ConfigureModelImporter(AnimationsPath, true, "Medieval locomotion animation source");
+    }
 
-        var characterChanged = false;
-        if (characterImporter.animationType != ModelImporterAnimationType.Generic)
+    private static void ConfigureModelImporter(string modelPath, bool configureLooping, string description)
+    {
+        var modelImporter = AssetImporter.GetAtPath(modelPath) as ModelImporter;
+        if (modelImporter == null)
         {
-            characterImporter.animationType = ModelImporterAnimationType.Generic;
-            characterChanged = true;
-        }
-
-        if (characterImporter.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
-        {
-            characterImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
-            characterChanged = true;
-        }
-
-        if (characterChanged)
-        {
-            characterImporter.SaveAndReimport();
-        }
-
-        var animationsImporter = AssetImporter.GetAtPath(AnimationsPath) as ModelImporter;
-        if (animationsImporter == null)
-        {
-            Debug.LogWarning($"Could not find animation importer at {AnimationsPath}.");
-            return;
-        }
-
-        var animationsChanged = false;
-        if (animationsImporter.animationType != ModelImporterAnimationType.Generic)
-        {
-            animationsImporter.animationType = ModelImporterAnimationType.Generic;
-            animationsChanged = true;
-        }
-
-        if (animationsImporter.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
-        {
-            animationsImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
-            animationsChanged = true;
-        }
-
-        var clipAnimations = animationsImporter.defaultClipAnimations;
-        for (var i = 0; i < clipAnimations.Length; i++)
-        {
-            var clip = clipAnimations[i];
-            if (!ShouldLoopClip(clip.name) || clip.loopTime)
+            if (configureLooping)
             {
-                continue;
+                Debug.LogWarning($"Could not find animation importer at {modelPath}.");
             }
 
-            clip.loopTime = true;
-            clipAnimations[i] = clip;
-            animationsChanged = true;
+            return;
         }
 
-        if (animationsChanged)
+        var changed = false;
+        if (modelImporter.animationType != ModelImporterAnimationType.Generic)
         {
-            animationsImporter.clipAnimations = clipAnimations;
-            animationsImporter.SaveAndReimport();
-            Debug.Log($"Configured {AnimationsPath} as the Medieval locomotion animation source.");
+            modelImporter.animationType = ModelImporterAnimationType.Generic;
+            changed = true;
+        }
+
+        if (modelImporter.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
+        {
+            modelImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            changed = true;
+        }
+
+        if (configureLooping)
+        {
+            var clipAnimations = modelImporter.defaultClipAnimations;
+            for (var i = 0; i < clipAnimations.Length; i++)
+            {
+                var clip = clipAnimations[i];
+                if (!ShouldLoopClip(clip.name) || clip.loopTime)
+                {
+                    continue;
+                }
+
+                clip.loopTime = true;
+                clipAnimations[i] = clip;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                modelImporter.clipAnimations = clipAnimations;
+            }
+        }
+
+        if (changed)
+        {
+            modelImporter.SaveAndReimport();
+            Debug.Log($"Configured {modelPath} as the {description}.");
         }
     }
 
@@ -356,13 +234,29 @@ public static class MedievalAnimationSetup
         return null;
     }
 
-    private static bool UsesGeneratedLocomotionClips(AnimatorController controller)
+    private static bool ControllerIsReady(AnimatorController controller)
     {
+        return ControllerUsesSourceClips(controller)
+            && ControllerHasTrigger(controller, "Attack")
+            && ControllerHasTrigger(controller, "Death")
+            && ControllerHasTrigger(controller, "Interact")
+            && ControllerHasState(controller, "Sword Slash")
+            && ControllerHasState(controller, "Death")
+            && ControllerHasState(controller, "Wave");
+    }
+
+    private static bool ControllerUsesSourceClips(AnimatorController controller)
+    {
+        if (controller == null)
+        {
+            return false;
+        }
+
         foreach (var layer in controller.layers)
         {
             foreach (var childState in layer.stateMachine.states)
             {
-                if (MotionUsesGeneratedClip(childState.state.motion))
+                if (MotionUsesSourceClip(childState.state.motion))
                 {
                     return true;
                 }
@@ -372,7 +266,27 @@ public static class MedievalAnimationSetup
         return false;
     }
 
-    private static bool MotionUsesGeneratedClip(Motion motion)
+    private static bool ControllerHasTrigger(AnimatorController controller, string parameterName)
+    {
+        if (controller == null)
+        {
+            return false;
+        }
+
+        return controller.parameters.Any(parameter => parameter.type == AnimatorControllerParameterType.Trigger && parameter.name == parameterName);
+    }
+
+    private static bool ControllerHasState(AnimatorController controller, string stateName)
+    {
+        if (controller == null)
+        {
+            return false;
+        }
+
+        return controller.layers.Any(layer => layer.stateMachine.states.Any(childState => childState.state.name == stateName));
+    }
+
+    private static bool MotionUsesSourceClip(Motion motion)
     {
         if (motion == null)
         {
@@ -382,14 +296,14 @@ public static class MedievalAnimationSetup
         if (motion is AnimationClip clip)
         {
             var path = AssetDatabase.GetAssetPath(clip).Replace("\\", "/");
-            return path.StartsWith(ClipFolder + "/", StringComparison.Ordinal) && HasStylizedArmCurves(clip);
+            return path == AnimationsPath;
         }
 
         if (motion is BlendTree blendTree)
         {
             foreach (var child in blendTree.children)
             {
-                if (MotionUsesGeneratedClip(child.motion))
+                if (MotionUsesSourceClip(child.motion))
                 {
                     return true;
                 }
@@ -397,13 +311,6 @@ public static class MedievalAnimationSetup
         }
 
         return false;
-    }
-
-    private static bool HasStylizedArmCurves(AnimationClip clip)
-    {
-        return AnimationUtility.GetCurveBindings(clip).Any(binding =>
-            binding.path.EndsWith("UpperArm.L", StringComparison.Ordinal)
-            && binding.propertyName == "localEulerAnglesRaw.z");
     }
 
     private static bool ShouldLoopClip(string clipName)

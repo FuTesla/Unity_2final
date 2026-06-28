@@ -15,6 +15,14 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
 
     [Header("Animation")]
     public RuntimeAnimatorController animatorController;
+    public string attackTrigger = "Attack";
+    public KeyCode interactKey = KeyCode.F;
+    public string interactTrigger = "Interact";
+
+    [Header("Combat")]
+    public float attackDamage = 25f;
+    public float attackRange = 1.85f;
+    public float attackRadius = 0.85f;
 
     private CharacterController characterController;
     private Animator animator;
@@ -71,6 +79,42 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         UpdateAnimator(input.magnitude, isRunning);
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            SetTriggerIfExists(attackTrigger);
+            TryHitEnemy();
+        }
+
+        if (Input.GetKeyDown(interactKey))
+        {
+            SetTriggerIfExists(interactTrigger);
+        }
+    }
+
+    private void TryHitEnemy()
+    {
+        var hitCenter = transform.position + transform.forward * attackRange;
+        var hits = Physics.OverlapSphere(hitCenter, attackRadius, ~0, QueryTriggerInteraction.Ignore);
+
+        foreach (var hit in hits)
+        {
+            var enemy = hit.GetComponentInParent<EnemyHealth>();
+            if (enemy == null || enemy.IsDead)
+            {
+                continue;
+            }
+
+            var toEnemy = enemy.transform.position - transform.position;
+            toEnemy.y = 0f;
+            if (Vector3.Dot(transform.forward, toEnemy.normalized) < 0.25f)
+            {
+                continue;
+            }
+
+            enemy.TakeDamage(attackDamage);
+            return;
+        }
     }
 
     private Vector3 GetCameraRelativeDirection(Vector2 input)
@@ -127,6 +171,23 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             if (parameter.type == AnimatorControllerParameterType.Bool && parameter.name == parameterName)
             {
                 animator.SetBool(parameterName, value);
+                return;
+            }
+        }
+    }
+
+    private void SetTriggerIfExists(string parameterName)
+    {
+        if (animator == null || string.IsNullOrEmpty(parameterName))
+        {
+            return;
+        }
+
+        foreach (var parameter in animator.parameters)
+        {
+            if (parameter.type == AnimatorControllerParameterType.Trigger && parameter.name == parameterName)
+            {
+                animator.SetTrigger(parameterName);
                 return;
             }
         }

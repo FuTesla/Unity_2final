@@ -4,7 +4,7 @@ using UnityEngine;
 public sealed class IsometricCameraFollow : MonoBehaviour
 {
     public Transform target;
-    public Vector3 offset = new Vector3(-5f, 7.1f, -5f);
+    public Vector3 offset = new Vector3(-3.7f, 5.25f, -3.7f);
     public float followSmoothTime = 0.08f;
     public bool lockRotation = true;
 
