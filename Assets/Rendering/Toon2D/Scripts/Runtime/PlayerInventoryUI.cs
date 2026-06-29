@@ -9,11 +9,9 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     public GameObject inventoryRoot;
     public TopDownCharacterMotor motor;
     public Animator animator;
-    public InventoryBlurPostProcess blurPostProcess;
     public RawImage characterPreviewImage;
     public Camera characterPreviewCamera;
     public Transform characterPreviewStage;
-    [Range(0f, 1f)] public float openBlurIntensity = 0.85f;
 
     private PlayerHealth health;
     private RenderTexture characterPreviewTexture;
@@ -65,11 +63,6 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         if (inventoryRoot != null)
         {
             inventoryRoot.SetActive(open);
-        }
-
-        if (blurPostProcess != null)
-        {
-            blurPostProcess.intensity = open ? openBlurIntensity : 0f;
         }
 
         if (characterPreviewCamera != null)

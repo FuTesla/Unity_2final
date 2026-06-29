@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -9,13 +10,13 @@ public sealed class PauseMenuController : MonoBehaviour
     public GameObject pauseRoot;
     public TopDownCharacterMotor motor;
     public PlayerInventoryUI inventoryUI;
-    public InventoryBlurPostProcess blurPostProcess;
-    [Range(0f, 1f)] public float pauseBlurIntensity = 0f;
 
     private const string PauseHudName = "Pause HUD";
     private const string PauseRootName = "Pause Root";
     private static PauseMenuController activeController;
     private static GameObject sharedPauseRoot;
+    private static Font readableFont;
+    private static Sprite roundedRectSprite;
 
     private bool isPaused;
     private bool restoreMotorEnabled;
@@ -45,22 +46,12 @@ public sealed class PauseMenuController : MonoBehaviour
             inventoryUI = GetComponent<PlayerInventoryUI>();
         }
 
-        if (blurPostProcess == null && Camera.main != null)
-        {
-            blurPostProcess = Camera.main.GetComponent<InventoryBlurPostProcess>();
-        }
-
         EnsurePauseMenu();
         WirePauseButtons();
         isPaused = false;
         if (pauseRoot != null)
         {
             pauseRoot.SetActive(false);
-        }
-
-        if (blurPostProcess != null)
-        {
-            blurPostProcess.intensity = 0f;
         }
     }
 
@@ -94,7 +85,21 @@ public sealed class PauseMenuController : MonoBehaviour
     {
         Time.timeScale = 1f;
         AudioListener.pause = false;
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
         Application.Quit();
+#endif
+    }
+
+    public void RestartGame()
+    {
+        Time.timeScale = 1f;
+        AudioListener.pause = false;
+        isPaused = false;
+
+        var activeScene = SceneManager.GetActiveScene();
+        SceneManager.LoadScene(activeScene.name);
     }
 
     public void SetPaused(bool paused)
@@ -141,11 +146,6 @@ public sealed class PauseMenuController : MonoBehaviour
             pauseRoot.SetActive(paused);
         }
 
-        if (blurPostProcess != null)
-        {
-            blurPostProcess.intensity = paused ? pauseBlurIntensity : 0f;
-        }
-
         if (motor != null)
         {
             motor.enabled = paused ? false : restoreMotorEnabled;
@@ -185,6 +185,7 @@ public sealed class PauseMenuController : MonoBehaviour
         var canvasObject = new GameObject(PauseHudName, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         var canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.overrideSorting = true;
         canvas.sortingOrder = 180;
 
         var scaler = canvasObject.GetComponent<CanvasScaler>();
@@ -213,36 +214,40 @@ public sealed class PauseMenuController : MonoBehaviour
         Stretch(root);
         ClearChildren(root);
 
-        var veil = CreateImage("Pause Veil", root, new Color(0f, 0f, 0f, 0.18f));
+        var veil = CreateImage("Pause Veil", root, new Color(0f, 0f, 0f, 0.42f));
         Stretch(veil.rectTransform);
+        veil.rectTransform.SetAsFirstSibling();
         veil.raycastTarget = true;
 
-        var panel = CreateImage("Pause Panel", root, new Color(0.055f, 0.06f, 0.068f, 0.86f));
-        panel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        panel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        panel.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        panel.rectTransform.anchoredPosition = Vector2.zero;
-        panel.rectTransform.sizeDelta = new Vector2(540f, 360f);
+        var panel = CreateRect("Pause Controls", root);
+        panel.anchorMin = new Vector2(0.5f, 0.5f);
+        panel.anchorMax = new Vector2(0.5f, 0.5f);
+        panel.pivot = new Vector2(0.5f, 0.5f);
+        panel.anchoredPosition = Vector2.zero;
+        panel.sizeDelta = new Vector2(540f, 430f);
 
-        var title = CreateText("Pause Title", panel.rectTransform, "\u6e38\u620f\u6682\u505c", 48, FontStyle.Bold, Color.white);
+        var title = CreateText("Pause Title", panel, "\u6e38\u620f\u6682\u505c", 48, FontStyle.Bold, Color.white);
         title.rectTransform.anchorMin = new Vector2(0f, 1f);
         title.rectTransform.anchorMax = new Vector2(1f, 1f);
         title.rectTransform.pivot = new Vector2(0.5f, 1f);
         title.rectTransform.anchoredPosition = new Vector2(0f, -48f);
         title.rectTransform.sizeDelta = new Vector2(-72f, 72f);
 
-        var hint = CreateText("Pause Hint", panel.rectTransform, "\u6309 ESC \u8fd4\u56de\u6e38\u620f", 24, FontStyle.Normal, new Color(0.78f, 0.82f, 0.88f, 1f));
+        var hint = CreateText("Pause Hint", panel, "\u6309 ESC \u7ee7\u7eed\u6e38\u620f", 24, FontStyle.Normal, new Color(0.78f, 0.82f, 0.88f, 1f));
         hint.rectTransform.anchorMin = new Vector2(0f, 1f);
         hint.rectTransform.anchorMax = new Vector2(1f, 1f);
         hint.rectTransform.pivot = new Vector2(0.5f, 1f);
         hint.rectTransform.anchoredPosition = new Vector2(0f, -126f);
         hint.rectTransform.sizeDelta = new Vector2(-72f, 42f);
 
-        var resume = CreateButton("Resume Button", panel.rectTransform, "\u7ee7\u7eed\u6e38\u620f");
-        resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -44f);
+        var resume = CreateButton("Resume Button", panel, "\u7ee7\u7eed\u6e38\u620f");
+        resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -42f);
 
-        var quit = CreateButton("Quit Button", panel.rectTransform, "\u9000\u51fa\u6e38\u620f");
-        quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -124f);
+        var restart = CreateButton("Restart Button", panel, "\u91cd\u65b0\u5f00\u59cb");
+        restart.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -118f);
+
+        var quit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
+        quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -194f);
     }
 
     private void WirePauseButtons()
@@ -264,6 +269,13 @@ public sealed class PauseMenuController : MonoBehaviour
         {
             quit.onClick.RemoveAllListeners();
             quit.onClick.AddListener(QuitGame);
+        }
+
+        var restart = FindButton(pauseRoot.transform, "Restart Button");
+        if (restart != null)
+        {
+            restart.onClick.RemoveAllListeners();
+            restart.onClick.AddListener(RestartGame);
         }
     }
 
@@ -352,6 +364,10 @@ public sealed class PauseMenuController : MonoBehaviour
     private static Button CreateButton(string objectName, Transform parent, string label)
     {
         var image = CreateImage(objectName, parent, new Color(0.12f, 0.32f, 0.56f, 0.96f));
+        image.sprite = GetRoundedRectSprite();
+        image.type = Image.Type.Sliced;
+        image.material = Graphic.defaultGraphicMaterial;
+
         var rect = image.rectTransform;
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -394,12 +410,87 @@ public sealed class PauseMenuController : MonoBehaviour
         var text = obj.GetComponent<Text>();
         text.text = value;
         text.alignment = TextAnchor.MiddleCenter;
-        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.font = GetReadableFont();
         text.fontSize = fontSize;
         text.fontStyle = style;
         text.color = color;
+        text.material = Graphic.defaultGraphicMaterial;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
         text.raycastTarget = false;
+
+        if (text.font != null)
+        {
+            text.font.RequestCharactersInTexture(value, fontSize, style);
+        }
+
         return text;
+    }
+
+    private static Font GetReadableFont()
+    {
+        if (readableFont != null)
+        {
+            return readableFont;
+        }
+
+        readableFont = Font.CreateDynamicFontFromOSFont(
+            new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
+            24);
+
+        if (readableFont == null)
+        {
+            readableFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        }
+
+        if (readableFont == null)
+        {
+            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+
+        return readableFont;
+    }
+
+    private static Sprite GetRoundedRectSprite()
+    {
+        if (roundedRectSprite != null)
+        {
+            return roundedRectSprite;
+        }
+
+        const int size = 64;
+        const int radius = 16;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+        {
+            name = "Generated Pause Rounded UI Sprite",
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var nearestX = Mathf.Clamp(x, radius, size - radius - 1);
+                var nearestY = Mathf.Clamp(y, radius, size - radius - 1);
+                var dx = x - nearestX;
+                var dy = y - nearestY;
+                var distance = Mathf.Sqrt(dx * dx + dy * dy);
+                var alpha = Mathf.Clamp01(radius + 0.5f - distance);
+                texture.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+            }
+        }
+
+        texture.Apply(false, true);
+        roundedRectSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            0,
+            SpriteMeshType.FullRect,
+            new Vector4(radius, radius, radius, radius));
+        return roundedRectSprite;
     }
 
     private static void Stretch(RectTransform rect)

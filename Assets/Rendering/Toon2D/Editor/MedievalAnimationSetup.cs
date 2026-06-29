@@ -35,7 +35,6 @@ public static class MedievalAnimationSetup
 
         if (ControllerIsReady(AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath)))
         {
-            MedievalSceneBindingSetup.BindOpenScene();
             return;
         }
 
@@ -155,7 +154,6 @@ public static class MedievalAnimationSetup
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        MedievalSceneBindingSetup.BindOpenScene();
         Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', Death='{death.name}', Wave='{wave.name}'.");
     }
 

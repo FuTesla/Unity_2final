@@ -10,6 +10,11 @@ public sealed class IsometricCameraFollow : MonoBehaviour
 
     private Vector3 velocity;
 
+    public void ResetVelocity()
+    {
+        velocity = Vector3.zero;
+    }
+
     private void LateUpdate()
     {
         if (target == null)

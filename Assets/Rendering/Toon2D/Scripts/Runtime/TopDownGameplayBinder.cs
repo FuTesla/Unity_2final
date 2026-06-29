@@ -105,8 +105,6 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
         pauseMenu.toggleKey = KeyCode.Escape;
         pauseMenu.motor = motor;
         pauseMenu.inventoryUI = target.GetComponent<PlayerInventoryUI>();
-        pauseMenu.blurPostProcess = GetComponent<InventoryBlurPostProcess>();
-        pauseMenu.pauseBlurIntensity = 0f;
 
         var animator = target.GetComponentInChildren<Animator>();
         if (animator != null)
