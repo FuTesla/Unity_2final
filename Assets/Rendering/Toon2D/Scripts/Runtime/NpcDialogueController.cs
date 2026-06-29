@@ -35,6 +35,7 @@ public sealed class NpcDialogueController : MonoBehaviour
         "\u8fd9\u7247\u533a\u57df\u5f88\u5371\u9669\uff0c\u8bf7\u4fdd\u6301\u8b66\u60d5\u3002",
         "\u795d\u4f60\u4e00\u8def\u987a\u5229\u3002"
     };
+    public string questTextAfterDialogue = "\u7EE7\u7EED\u5411\u524D\u63A2\u7D22";
 
     private const string DialogueHudName = "Dialogue HUD";
 
@@ -55,6 +56,7 @@ public sealed class NpcDialogueController : MonoBehaviour
     private bool isCameraTransitioning;
     private bool hasCameraSnapshot;
     private bool dialogueCompleted;
+    private bool questIssued;
 
     private void Awake()
     {
@@ -171,6 +173,12 @@ public sealed class NpcDialogueController : MonoBehaviour
             RestoreCameraImmediate();
             RestorePlayerMovement();
             return;
+        }
+
+        if (!questIssued && !string.IsNullOrWhiteSpace(questTextAfterDialogue))
+        {
+            QuestTrackerUI.ShowQuest(questTextAfterDialogue);
+            questIssued = true;
         }
 
         var startSize = mainCamera != null ? mainCamera.orthographicSize : dialogueOrthographicSize;

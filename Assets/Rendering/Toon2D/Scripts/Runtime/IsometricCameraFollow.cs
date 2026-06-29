@@ -7,12 +7,28 @@ public sealed class IsometricCameraFollow : MonoBehaviour
     public Vector3 offset = new Vector3(-3.7f, 5.25f, -3.7f);
     public float followSmoothTime = 0.08f;
     public bool lockRotation = true;
+    public float damageShakeInterval = 0.7f;
+    public float damageShakeDuration = 0.16f;
+    public float damageShakeAmplitude = 0.18f;
 
     private Vector3 velocity;
+    private float shakeEndTime;
+    private float nextAllowedShakeTime;
 
     public void ResetVelocity()
     {
         velocity = Vector3.zero;
+    }
+
+    public void TryPlayDamageShake()
+    {
+        if (Time.time < nextAllowedShakeTime)
+        {
+            return;
+        }
+
+        nextAllowedShakeTime = Time.time + Mathf.Max(0.01f, damageShakeInterval);
+        shakeEndTime = Mathf.Max(shakeEndTime, Time.time + Mathf.Max(0.01f, damageShakeDuration));
     }
 
     private void LateUpdate()
@@ -24,6 +40,11 @@ public sealed class IsometricCameraFollow : MonoBehaviour
 
         var desiredPosition = target.position + offset;
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, followSmoothTime);
+
+        if (Time.time < shakeEndTime)
+        {
+            transform.position += GetShakeOffset();
+        }
 
         if (lockRotation)
         {
@@ -37,5 +58,12 @@ public sealed class IsometricCameraFollow : MonoBehaviour
         {
             transform.LookAt(target.position);
         }
+    }
+
+    private Vector3 GetShakeOffset()
+    {
+        var random = Random.insideUnitSphere * damageShakeAmplitude;
+        random.y *= 0.65f;
+        return random;
     }
 }

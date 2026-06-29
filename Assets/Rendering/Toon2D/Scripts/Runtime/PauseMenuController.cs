@@ -6,6 +6,12 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public sealed class PauseMenuController : MonoBehaviour
 {
+    private enum MenuMode
+    {
+        Pause,
+        Death
+    }
+
     public KeyCode toggleKey = KeyCode.Escape;
     public GameObject pauseRoot;
     public TopDownCharacterMotor motor;
@@ -23,6 +29,7 @@ public sealed class PauseMenuController : MonoBehaviour
     private float previousTimeScale = 1f;
     private bool previousCursorVisible;
     private CursorLockMode previousCursorLockMode;
+    private MenuMode currentMode = MenuMode.Pause;
 
     public bool IsPaused => isPaused;
 
@@ -70,6 +77,11 @@ public sealed class PauseMenuController : MonoBehaviour
 
     private void Update()
     {
+        if (currentMode == MenuMode.Death)
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(toggleKey))
         {
             SetPaused(!isPaused);
@@ -97,9 +109,18 @@ public sealed class PauseMenuController : MonoBehaviour
         Time.timeScale = 1f;
         AudioListener.pause = false;
         isPaused = false;
+        currentMode = MenuMode.Pause;
 
         var activeScene = SceneManager.GetActiveScene();
         SceneManager.LoadScene(activeScene.name);
+    }
+
+    public void ShowDeathMenu()
+    {
+        currentMode = MenuMode.Death;
+        EnsurePauseMenu();
+        WirePauseButtons();
+        SetPaused(true, true);
     }
 
     public void SetPaused(bool paused)
@@ -157,7 +178,7 @@ public sealed class PauseMenuController : MonoBehaviour
         if (pauseRoot != null)
         {
             sharedPauseRoot = pauseRoot;
-            BuildPauseMenuContent(pauseRoot.GetComponent<RectTransform>());
+            BuildMenuContent(pauseRoot.GetComponent<RectTransform>(), currentMode);
             DestroyDuplicatePauseCanvases(pauseRoot.transform.root.gameObject);
             return;
         }
@@ -165,7 +186,7 @@ public sealed class PauseMenuController : MonoBehaviour
         if (sharedPauseRoot != null)
         {
             pauseRoot = sharedPauseRoot;
-            BuildPauseMenuContent(pauseRoot.GetComponent<RectTransform>());
+            BuildMenuContent(pauseRoot.GetComponent<RectTransform>(), currentMode);
             DestroyDuplicatePauseCanvases(pauseRoot.transform.root.gameObject);
             return;
         }
@@ -177,7 +198,7 @@ public sealed class PauseMenuController : MonoBehaviour
         {
             pauseRoot = existingRoot.gameObject;
             sharedPauseRoot = pauseRoot;
-            BuildPauseMenuContent(existingRoot);
+            BuildMenuContent(existingRoot, currentMode);
             DestroyDuplicatePauseCanvases(pauseRoot.transform.root.gameObject);
             return;
         }
@@ -198,13 +219,13 @@ public sealed class PauseMenuController : MonoBehaviour
         Stretch(root);
         pauseRoot = root.gameObject;
         sharedPauseRoot = pauseRoot;
-        BuildPauseMenuContent(root);
+        BuildMenuContent(root, currentMode);
 
         pauseRoot.SetActive(false);
         DestroyDuplicatePauseCanvases(canvasObject);
     }
 
-    private static void BuildPauseMenuContent(RectTransform root)
+    private static void BuildMenuContent(RectTransform root, MenuMode mode)
     {
         if (root == null)
         {
@@ -226,28 +247,40 @@ public sealed class PauseMenuController : MonoBehaviour
         panel.anchoredPosition = Vector2.zero;
         panel.sizeDelta = new Vector2(540f, 430f);
 
-        var title = CreateText("Pause Title", panel, "\u6e38\u620f\u6682\u505c", 48, FontStyle.Bold, Color.white);
+        var titleValue = mode == MenuMode.Death ? "\u518d\u6765\u4e00\u6b21\uff1f" : "\u6e38\u620f\u6682\u505c";
+        var title = CreateText("Pause Title", panel, titleValue, 48, FontStyle.Bold, Color.white);
         title.rectTransform.anchorMin = new Vector2(0f, 1f);
         title.rectTransform.anchorMax = new Vector2(1f, 1f);
         title.rectTransform.pivot = new Vector2(0.5f, 1f);
         title.rectTransform.anchoredPosition = new Vector2(0f, -48f);
         title.rectTransform.sizeDelta = new Vector2(-72f, 72f);
 
-        var hint = CreateText("Pause Hint", panel, "\u6309 ESC \u7ee7\u7eed\u6e38\u620f", 24, FontStyle.Normal, new Color(0.78f, 0.82f, 0.88f, 1f));
+        var hintValue = mode == MenuMode.Death ? "\u4f60\u5df2\u5012\u4e0b" : "\u6309 ESC \u7ee7\u7eed\u6e38\u620f";
+        var hint = CreateText("Pause Hint", panel, hintValue, 24, FontStyle.Normal, new Color(0.78f, 0.82f, 0.88f, 1f));
         hint.rectTransform.anchorMin = new Vector2(0f, 1f);
         hint.rectTransform.anchorMax = new Vector2(1f, 1f);
         hint.rectTransform.pivot = new Vector2(0.5f, 1f);
         hint.rectTransform.anchoredPosition = new Vector2(0f, -126f);
         hint.rectTransform.sizeDelta = new Vector2(-72f, 42f);
 
-        var resume = CreateButton("Resume Button", panel, "\u7ee7\u7eed\u6e38\u620f");
-        resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -42f);
+        if (mode == MenuMode.Pause)
+        {
+            var resume = CreateButton("Resume Button", panel, "\u7ee7\u7eed\u6e38\u620f");
+            resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -42f);
 
-        var restart = CreateButton("Restart Button", panel, "\u91cd\u65b0\u5f00\u59cb");
-        restart.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -118f);
+            var restart = CreateButton("Restart Button", panel, "\u91cd\u65b0\u5f00\u59cb");
+            restart.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -118f);
 
-        var quit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
-        quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -194f);
+            var quit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
+            quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -194f);
+            return;
+        }
+
+        var deathRestart = CreateButton("Restart Button", panel, "\u91cd\u65b0\u5f00\u59cb");
+        deathRestart.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -82f);
+
+        var deathQuit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
+        deathQuit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -158f);
     }
 
     private void WirePauseButtons()
