@@ -4,17 +4,29 @@ using System.Collections;
 public sealed class PlayerHealth : MonoBehaviour
 {
     public float maxHealth = 100f;
+    public string firstHitTrigger = "Hit";
+    public string secondHitTrigger = "Hit2";
+    public string firstHitStateName = "Hit";
+    public string secondHitStateName = "Hit 2";
+    public float hitFeedbackInterval = 0.7f;
     public string deathTrigger = "Death";
     public string deathStateName = "Death";
     public string damageZoneName = "Damage Zone";
     public float damageZoneRadius = 1.3f;
     public float damagePerSecond = 10f;
+    public float damagePopupYOffset = 1.9f;
+    public float minDamagePopupAmount = 0.5f;
+    public float damagePopupInterval = 0.35f;
 
     private Animator animator;
     private TopDownCharacterMotor motor;
     private IsometricCameraFollow cameraFollow;
     private PauseMenuController pauseMenu;
     private float currentHealth;
+    private float lastHitFeedbackTime = float.NegativeInfinity;
+    private float pendingPopupDamage;
+    private float nextDamagePopupTime;
+    private bool playSecondHitAnimationNext;
     private bool isDead;
     private bool deathMenuShown;
 
@@ -67,14 +79,86 @@ public sealed class PlayerHealth : MonoBehaviour
         }
 
         currentHealth = Mathf.Max(0f, currentHealth - amount);
+
+        if (currentHealth <= 0f)
+        {
+            ShowDamagePopup(amount);
+            Die();
+            return;
+        }
+
+        PlayHitFeedback();
+        ShowDamagePopup(amount);
+    }
+
+    private void ShowDamagePopup(float amount)
+    {
+        if (amount >= minDamagePopupAmount)
+        {
+            TryShowDamagePopup(amount);
+            return;
+        }
+
+        pendingPopupDamage += amount;
+        if (pendingPopupDamage < minDamagePopupAmount || Time.time < nextDamagePopupTime)
+        {
+            return;
+        }
+
+        TryShowDamagePopup(pendingPopupDamage);
+        pendingPopupDamage = 0f;
+        nextDamagePopupTime = Time.time + damagePopupInterval;
+    }
+
+    private void TryShowDamagePopup(float amount)
+    {
+        try
+        {
+            DamagePopup.Show(transform.position + Vector3.up * damagePopupYOffset, amount);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"Damage popup failed on player: {exception.Message}", this);
+        }
+    }
+
+    private void PlayHitFeedback()
+    {
+        if (Time.time - lastHitFeedbackTime < hitFeedbackInterval)
+        {
+            return;
+        }
+
+        lastHitFeedbackTime = Time.time;
+
         if (cameraFollow != null)
         {
             cameraFollow.TryPlayDamageShake();
         }
 
-        if (currentHealth <= 0f)
+        if (animator == null)
         {
-            Die();
+            return;
+        }
+
+        SetFloatIfExists("Speed", 0f);
+        SetBoolIfExists("IsMoving", false);
+        SetBoolIfExists("Moving", false);
+        SetBoolIfExists("IsRunning", false);
+        SetBoolIfExists("Running", false);
+
+        var triggerName = playSecondHitAnimationNext ? secondHitTrigger : firstHitTrigger;
+        var stateName = playSecondHitAnimationNext ? secondHitStateName : firstHitStateName;
+        playSecondHitAnimationNext = !playSecondHitAnimationNext;
+
+        if (SetTriggerIfExists(triggerName))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(stateName))
+        {
+            animator.CrossFadeInFixedTime(stateName, 0.05f);
         }
     }
 
@@ -188,11 +272,11 @@ public sealed class PlayerHealth : MonoBehaviour
         }
     }
 
-    private void SetTriggerIfExists(string parameterName)
+    private bool SetTriggerIfExists(string parameterName)
     {
         if (string.IsNullOrEmpty(parameterName))
         {
-            return;
+            return false;
         }
 
         foreach (var parameter in animator.parameters)
@@ -200,8 +284,10 @@ public sealed class PlayerHealth : MonoBehaviour
             if (parameter.type == AnimatorControllerParameterType.Trigger && parameter.name == parameterName)
             {
                 animator.SetTrigger(parameterName);
-                return;
+                return true;
             }
         }
+
+        return false;
     }
 }

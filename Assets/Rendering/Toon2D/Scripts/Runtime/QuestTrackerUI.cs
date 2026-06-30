@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,19 +12,24 @@ public sealed class QuestTrackerUI : MonoBehaviour
 
     private GameObject canvasObject;
     private Image panelImage;
+    private RectTransform panelRect;
     private Text questText;
     private string activeQuestText = string.Empty;
     private string completionText = string.Empty;
     private bool isCompleted;
+    private Coroutine slideRoutine;
     private TopDownCharacterMotor playerMotor;
     private CharacterController playerController;
     private QuestObjectiveZone objectiveZone;
     private Transform objectiveTransform;
     private static Font readableFont;
     private static Sprite roundedRectSprite;
+    private static readonly Vector2 VisiblePanelPosition = new Vector2(36f, -34f);
+    private static readonly Vector2 HiddenPanelPosition = new Vector2(-460f, -34f);
 
     public static bool HasActiveQuest => instance != null && !string.IsNullOrEmpty(instance.activeQuestText);
     public static string CurrentQuestText => instance != null ? instance.activeQuestText : string.Empty;
+    public static bool IsCompleted => instance != null && instance.isCompleted;
 
     public static void ShowQuest(string questMessage)
     {
@@ -36,7 +42,9 @@ public sealed class QuestTrackerUI : MonoBehaviour
         instance.activeQuestText = questMessage;
         instance.completionText = string.Empty;
         instance.isCompleted = false;
+        instance.StopSlideRoutine();
         instance.Refresh();
+        instance.ResetPanelPosition();
     }
 
     public static void CompleteQuest(string completionSuffix)
@@ -51,6 +59,7 @@ public sealed class QuestTrackerUI : MonoBehaviour
         instance.completionText = completionSuffix ?? string.Empty;
 
         instance.Refresh();
+        instance.BeginCompletedSlideOut();
     }
 
     public static void ShowCompletedQuest(string questMessage, string completionSuffix)
@@ -65,6 +74,7 @@ public sealed class QuestTrackerUI : MonoBehaviour
         instance.completionText = completionSuffix ?? string.Empty;
         instance.isCompleted = true;
         instance.Refresh();
+        instance.BeginCompletedSlideOut();
     }
 
     private static void EnsureInstance()
@@ -128,6 +138,7 @@ public sealed class QuestTrackerUI : MonoBehaviour
             questText = FindText(existingCanvas.transform, "Quest Tracker Text");
             if (panelImage != null && questText != null)
             {
+                panelRect = panelImage.rectTransform;
                 return;
             }
 
@@ -149,13 +160,14 @@ public sealed class QuestTrackerUI : MonoBehaviour
         Stretch(root);
 
         panelImage = CreateRoundedImage(PanelName, root, new Color(0.07f, 0.09f, 0.12f, 0.95f));
-        panelImage.rectTransform.anchorMin = new Vector2(0f, 1f);
-        panelImage.rectTransform.anchorMax = new Vector2(0f, 1f);
-        panelImage.rectTransform.pivot = new Vector2(0f, 1f);
-        panelImage.rectTransform.anchoredPosition = new Vector2(36f, -34f);
-        panelImage.rectTransform.sizeDelta = new Vector2(420f, 74f);
+        panelRect = panelImage.rectTransform;
+        panelRect.anchorMin = new Vector2(0f, 1f);
+        panelRect.anchorMax = new Vector2(0f, 1f);
+        panelRect.pivot = new Vector2(0f, 1f);
+        panelRect.anchoredPosition = VisiblePanelPosition;
+        panelRect.sizeDelta = new Vector2(420f, 74f);
 
-        questText = CreateText("Quest Tracker Text", panelImage.rectTransform, string.Empty, 25, FontStyle.Bold, Color.white);
+        questText = CreateText("Quest Tracker Text", panelRect, string.Empty, 25, FontStyle.Bold, Color.white);
         questText.rectTransform.anchorMin = Vector2.zero;
         questText.rectTransform.anchorMax = Vector2.one;
         questText.rectTransform.offsetMin = new Vector2(18f, 12f);
@@ -183,7 +195,8 @@ public sealed class QuestTrackerUI : MonoBehaviour
             panelImage.color = isCompleted
                 ? new Color(0.14f, 0.58f, 0.22f, 0.98f)
                 : new Color(0.07f, 0.09f, 0.12f, 0.95f);
-            panelImage.rectTransform.sizeDelta = isCompleted
+            panelRect = panelImage.rectTransform;
+            panelRect.sizeDelta = isCompleted
                 ? new Vector2(420f, 112f)
                 : new Vector2(420f, 74f);
         }
@@ -195,6 +208,71 @@ public sealed class QuestTrackerUI : MonoBehaviour
                 ? $"{activeQuestText}\n{completionText}"
                 : activeQuestText;
         }
+    }
+
+    private void BeginCompletedSlideOut()
+    {
+        StopSlideRoutine();
+        slideRoutine = StartCoroutine(SlideCompletedQuestOut());
+    }
+
+    private IEnumerator SlideCompletedQuestOut()
+    {
+        ResetPanelPosition();
+        yield return new WaitForSecondsRealtime(1.2f);
+
+        if (panelRect == null)
+        {
+            yield break;
+        }
+
+        const float duration = 0.45f;
+        var elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            var t = Mathf.Clamp01(elapsed / duration);
+            t = t * t * (3f - 2f * t);
+            panelRect.anchoredPosition = Vector2.Lerp(VisiblePanelPosition, HiddenPanelPosition, t);
+            yield return null;
+        }
+
+        panelRect.anchoredPosition = HiddenPanelPosition;
+        if (canvasObject != null)
+        {
+            canvasObject.SetActive(false);
+        }
+
+        slideRoutine = null;
+    }
+
+    private void ResetPanelPosition()
+    {
+        if (canvasObject != null && !canvasObject.activeSelf)
+        {
+            canvasObject.SetActive(true);
+        }
+
+        if (panelRect == null && panelImage != null)
+        {
+            panelRect = panelImage.rectTransform;
+        }
+
+        if (panelRect != null)
+        {
+            panelRect.anchoredPosition = VisiblePanelPosition;
+        }
+    }
+
+    private void StopSlideRoutine()
+    {
+        if (slideRoutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(slideRoutine);
+        slideRoutine = null;
     }
 
     private bool IsPlayerInsideObjectiveZone()
@@ -345,13 +423,20 @@ public sealed class QuestTrackerUI : MonoBehaviour
             return readableFont;
         }
 
-        readableFont = Font.CreateDynamicFontFromOSFont(
-            new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-            24);
+        try
+        {
+            readableFont = Font.CreateDynamicFontFromOSFont(
+                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
+                24);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"Quest tracker font lookup failed: {exception.Message}");
+        }
 
         if (readableFont == null)
         {
-            readableFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         }
 
         return readableFont;

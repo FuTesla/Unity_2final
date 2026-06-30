@@ -71,12 +71,17 @@ public static class MedievalAnimationSetup
         var walk = FindClip(importedClips, "CharacterArmature|Walk", "Walk") ?? idle;
         var run = FindClip(importedClips, "CharacterArmature|Run", "Run") ?? walk;
         var swordSlash = FindClip(importedClips, "CharacterArmature|Sword_Slash", "Sword_Slash", "Slash", "Attack");
+        var punchRight = FindClip(importedClips, "CharacterArmature|Punch_Right", "Punch_Right", "PunchRight");
+        var punchLeft = FindClip(importedClips, "CharacterArmature|Punch_Left", "Punch_Left", "PunchLeft");
+        var kickRight = FindClip(importedClips, "CharacterArmature|Kick_Right", "Kick_Right", "KickRight");
+        var hit = FindClip(importedClips, "CharacterArmature|HitRecieve", "HitRecieve", "HitReceive", "Hit");
+        var hit2 = FindClip(importedClips, "CharacterArmature|HitRecieve_2", "HitRecieve_2", "HitReceive_2", "Hit_2");
         var death = FindClip(importedClips, "CharacterArmature|Death", "Death", "Die", "Dead");
         var wave = FindClip(importedClips, "CharacterArmature|Wave", "Wave", "Interact");
 
-        if (idle == null || walk == null || run == null || swordSlash == null || death == null || wave == null)
+        if (idle == null || walk == null || run == null || swordSlash == null || punchRight == null || punchLeft == null || kickRight == null || hit == null || hit2 == null || death == null || wave == null)
         {
-            Debug.LogError($"Could not find Idle/Walk/Run/Sword Slash/Death/Wave clips in {AnimationsPath}.");
+            Debug.LogError($"Could not find Idle/Walk/Run/Sword Slash/Punch Right/Punch Left/Kick Right/Hit/Hit 2/Death/Wave clips in {AnimationsPath}.");
             return;
         }
 
@@ -85,6 +90,11 @@ public static class MedievalAnimationSetup
         controller.AddParameter("IsMoving", AnimatorControllerParameterType.Bool);
         controller.AddParameter("IsRunning", AnimatorControllerParameterType.Bool);
         controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("PunchRight", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("PunchLeft", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("KickRight", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("Hit", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("Hit2", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("Death", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("Interact", AnimatorControllerParameterType.Trigger);
 
@@ -123,6 +133,40 @@ public static class MedievalAnimationSetup
         exitAttack.exitTime = 0.85f;
         exitAttack.duration = 0.08f;
 
+        AddOneShotState(stateMachine, locomotion, "Punch Right", punchRight, "PunchRight", 1f, 0.9f, 0.08f);
+        AddOneShotState(stateMachine, locomotion, "Punch Left", punchLeft, "PunchLeft", 1f, 0.9f, 0.08f);
+        AddOneShotState(stateMachine, locomotion, "Kick Right", kickRight, "KickRight", 1f, 0.9f, 0.08f);
+
+        var hitState = stateMachine.AddState("Hit");
+        hitState.motion = hit;
+        hitState.writeDefaultValues = true;
+
+        var enterHit = stateMachine.AddAnyStateTransition(hitState);
+        enterHit.hasExitTime = false;
+        enterHit.duration = 0.05f;
+        enterHit.canTransitionToSelf = false;
+        enterHit.AddCondition(AnimatorConditionMode.If, 0f, "Hit");
+
+        var exitHit = hitState.AddTransition(locomotion);
+        exitHit.hasExitTime = true;
+        exitHit.exitTime = 0.9f;
+        exitHit.duration = 0.08f;
+
+        var hit2State = stateMachine.AddState("Hit 2");
+        hit2State.motion = hit2;
+        hit2State.writeDefaultValues = true;
+
+        var enterHit2 = stateMachine.AddAnyStateTransition(hit2State);
+        enterHit2.hasExitTime = false;
+        enterHit2.duration = 0.05f;
+        enterHit2.canTransitionToSelf = false;
+        enterHit2.AddCondition(AnimatorConditionMode.If, 0f, "Hit2");
+
+        var exitHit2 = hit2State.AddTransition(locomotion);
+        exitHit2.hasExitTime = true;
+        exitHit2.exitTime = 0.9f;
+        exitHit2.duration = 0.08f;
+
         var waveState = stateMachine.AddState("Wave");
         waveState.motion = wave;
         waveState.writeDefaultValues = true;
@@ -154,7 +198,36 @@ public static class MedievalAnimationSetup
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', Death='{death.name}', Wave='{wave.name}'.");
+        Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', PunchRight='{punchRight.name}', PunchLeft='{punchLeft.name}', KickRight='{kickRight.name}', Hit='{hit.name}', Hit2='{hit2.name}', Death='{death.name}', Wave='{wave.name}'.");
+    }
+
+    private static AnimatorState AddOneShotState(
+        AnimatorStateMachine stateMachine,
+        AnimatorState locomotion,
+        string stateName,
+        Motion motion,
+        string triggerName,
+        float speed,
+        float exitTime,
+        float exitDuration)
+    {
+        var state = stateMachine.AddState(stateName);
+        state.motion = motion;
+        state.writeDefaultValues = true;
+        state.speed = speed;
+
+        var enter = stateMachine.AddAnyStateTransition(state);
+        enter.hasExitTime = false;
+        enter.duration = 0.05f;
+        enter.canTransitionToSelf = false;
+        enter.AddCondition(AnimatorConditionMode.If, 0f, triggerName);
+
+        var exit = state.AddTransition(locomotion);
+        exit.hasExitTime = true;
+        exit.exitTime = exitTime;
+        exit.duration = exitDuration;
+
+        return state;
     }
 
     private static void ConfigureGenericImporters()
@@ -236,9 +309,19 @@ public static class MedievalAnimationSetup
     {
         return ControllerUsesSourceClips(controller)
             && ControllerHasTrigger(controller, "Attack")
+            && ControllerHasTrigger(controller, "PunchRight")
+            && ControllerHasTrigger(controller, "PunchLeft")
+            && ControllerHasTrigger(controller, "KickRight")
+            && ControllerHasTrigger(controller, "Hit")
+            && ControllerHasTrigger(controller, "Hit2")
             && ControllerHasTrigger(controller, "Death")
             && ControllerHasTrigger(controller, "Interact")
             && ControllerHasState(controller, "Sword Slash")
+            && ControllerHasState(controller, "Punch Right")
+            && ControllerHasState(controller, "Punch Left")
+            && ControllerHasState(controller, "Kick Right")
+            && ControllerHasState(controller, "Hit")
+            && ControllerHasState(controller, "Hit 2")
             && ControllerHasState(controller, "Death")
             && ControllerHasState(controller, "Wave");
     }

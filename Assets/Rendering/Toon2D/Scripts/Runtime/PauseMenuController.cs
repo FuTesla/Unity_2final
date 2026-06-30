@@ -82,6 +82,11 @@ public sealed class PauseMenuController : MonoBehaviour
             return;
         }
 
+        if (QuestJournalUI.IsOpen)
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(toggleKey))
         {
             SetPaused(!isPaused);
@@ -467,13 +472,15 @@ public sealed class PauseMenuController : MonoBehaviour
             return readableFont;
         }
 
-        readableFont = Font.CreateDynamicFontFromOSFont(
-            new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-            24);
-
-        if (readableFont == null)
+        try
         {
-            readableFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            readableFont = Font.CreateDynamicFontFromOSFont(
+                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
+                24);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"Pause menu font lookup failed: {exception.Message}");
         }
 
         if (readableFont == null)

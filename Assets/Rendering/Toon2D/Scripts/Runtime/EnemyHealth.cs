@@ -7,11 +7,16 @@ public sealed class EnemyHealth : MonoBehaviour
     public string deathStateName = "Death";
     public string damageZoneName = "Damage Zone";
     public float damagePerSecond = 10f;
+    public float damagePopupYOffset = 1.9f;
+    public float minDamagePopupAmount = 0.5f;
+    public float damagePopupInterval = 0.35f;
 
     private Animator animator;
     private EnemyAIController aiController;
     private CharacterController characterController;
     private float currentHealth;
+    private float pendingPopupDamage;
+    private float nextDamagePopupTime;
     private bool isDead;
 
     public float CurrentHealth => currentHealth;
@@ -54,9 +59,41 @@ public sealed class EnemyHealth : MonoBehaviour
         }
 
         currentHealth = Mathf.Max(0f, currentHealth - amount);
+        ShowDamagePopup(amount);
         if (currentHealth <= 0f)
         {
             Die();
+        }
+    }
+
+    private void ShowDamagePopup(float amount)
+    {
+        if (amount >= minDamagePopupAmount)
+        {
+            TryShowDamagePopup(amount);
+            return;
+        }
+
+        pendingPopupDamage += amount;
+        if (pendingPopupDamage < minDamagePopupAmount || Time.time < nextDamagePopupTime)
+        {
+            return;
+        }
+
+        TryShowDamagePopup(pendingPopupDamage);
+        pendingPopupDamage = 0f;
+        nextDamagePopupTime = Time.time + damagePopupInterval;
+    }
+
+    private void TryShowDamagePopup(float amount)
+    {
+        try
+        {
+            DamagePopup.Show(transform.position + Vector3.up * damagePopupYOffset, amount);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"Damage popup failed on enemy: {exception.Message}", this);
         }
     }
 

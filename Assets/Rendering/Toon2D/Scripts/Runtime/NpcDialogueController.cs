@@ -254,11 +254,11 @@ public sealed class NpcDialogueController : MonoBehaviour
         var root = dialogueHud.GetComponent<RectTransform>();
         Stretch(root);
 
-        var panel = CreateImage("Dialogue Panel", root, new Color(0.035f, 0.04f, 0.05f, 0.9f));
+        var panel = CreateRoundedImage("Dialogue Panel", root, new Color(0.035f, 0.04f, 0.05f, 0.9f));
         panel.rectTransform.anchorMin = new Vector2(0.5f, 0f);
         panel.rectTransform.anchorMax = new Vector2(0.5f, 0f);
         panel.rectTransform.pivot = new Vector2(0.5f, 0f);
-        panel.rectTransform.anchoredPosition = new Vector2(0f, 36f);
+        panel.rectTransform.anchoredPosition = new Vector2(0f, 95f);
         panel.rectTransform.sizeDelta = new Vector2(1320f, 190f);
 
         dialogueText = CreateText("NPC Dialogue Text", panel.rectTransform, string.Empty, 31, FontStyle.Normal, Color.white);
@@ -583,13 +583,15 @@ public sealed class NpcDialogueController : MonoBehaviour
             return readableFont;
         }
 
-        readableFont = Font.CreateDynamicFontFromOSFont(
-            new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-            24);
-
-        if (readableFont == null)
+        try
         {
-            readableFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            readableFont = Font.CreateDynamicFontFromOSFont(
+                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
+                24);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"NPC dialogue font lookup failed: {exception.Message}");
         }
 
         if (readableFont == null)

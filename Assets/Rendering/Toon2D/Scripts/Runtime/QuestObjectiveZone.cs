@@ -10,6 +10,8 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
     private const string VisualName = "Quest Objective Visual";
 
+    private BoxCollider triggerCollider;
+    private Rigidbody triggerBody;
     private Transform visualRoot;
     private Material runtimeMaterial;
     private bool isCompleted;
@@ -39,25 +41,53 @@ public sealed class QuestObjectiveZone : MonoBehaviour
         }
     }
 
+    private void OnTriggerEnter(Collider other)
+    {
+        TryCompleteQuestFromCollider(other);
+    }
+
+    private void OnTriggerStay(Collider other)
+    {
+        TryCompleteQuestFromCollider(other);
+    }
+
     private void EnsureZoneSetup()
     {
-        DisableBlockingColliders();
+        EnsureTriggerCollider();
 
         EnsureVisual();
     }
 
-    private void DisableBlockingColliders()
+    private void EnsureTriggerCollider()
     {
-        foreach (var collider in GetComponents<Collider>())
+        if (triggerCollider == null)
         {
-            collider.enabled = false;
+            triggerCollider = GetComponent<BoxCollider>();
         }
 
-        foreach (var body in GetComponents<Rigidbody>())
+        if (triggerCollider == null)
         {
-            body.isKinematic = true;
-            body.detectCollisions = false;
+            triggerCollider = gameObject.AddComponent<BoxCollider>();
         }
+
+        triggerCollider.enabled = true;
+        triggerCollider.isTrigger = true;
+        triggerCollider.center = Vector3.zero;
+        triggerCollider.size = zoneSize;
+
+        if (triggerBody == null)
+        {
+            triggerBody = GetComponent<Rigidbody>();
+        }
+
+        if (triggerBody == null)
+        {
+            triggerBody = gameObject.AddComponent<Rigidbody>();
+        }
+
+        triggerBody.isKinematic = true;
+        triggerBody.useGravity = false;
+        triggerBody.detectCollisions = true;
     }
 
     private void EnsureVisual()
@@ -91,6 +121,8 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
             visualRoot = primitive.transform;
         }
+
+        RemoveVisualColliders();
 
         visualRoot.localPosition = Vector3.zero;
         visualRoot.localRotation = Quaternion.identity;
@@ -148,6 +180,26 @@ public sealed class QuestObjectiveZone : MonoBehaviour
         renderer.receiveShadows = false;
     }
 
+    private void RemoveVisualColliders()
+    {
+        if (visualRoot == null)
+        {
+            return;
+        }
+
+        foreach (var collider in visualRoot.GetComponentsInChildren<Collider>())
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(collider);
+            }
+            else
+            {
+                DestroyImmediate(collider);
+            }
+        }
+    }
+
     private void TryCompleteQuestFromPlayerPosition()
     {
         if (isCompleted)
@@ -182,6 +234,22 @@ public sealed class QuestObjectiveZone : MonoBehaviour
             : zoneBounds.Contains(playerMotor.transform.position);
 
         if (!insideZone)
+        {
+            return;
+        }
+
+        isCompleted = true;
+        QuestTrackerUI.ShowCompletedQuest(requiredQuestText, completionText);
+    }
+
+    private void TryCompleteQuestFromCollider(Collider other)
+    {
+        if (isCompleted || other == null)
+        {
+            return;
+        }
+
+        if (other.GetComponentInParent<TopDownCharacterMotor>() == null)
         {
             return;
         }
