@@ -4,12 +4,12 @@ using UnityEngine;
 public sealed class IsometricCameraFollow : MonoBehaviour
 {
     public Transform target;
-    public Vector3 offset = new Vector3(-3.7f, 5.25f, -3.7f);
+    public Vector3 offset = new Vector3(-24.5f, 34.8f, -24.5f);
     public float followSmoothTime = 0.08f;
     public bool lockRotation = true;
     public float damageShakeInterval = 0.7f;
     public float damageShakeDuration = 0.16f;
-    public float damageShakeAmplitude = 0.18f;
+    public float damageShakeAmplitude = 0.35f;
 
     private Vector3 velocity;
     private float shakeEndTime;

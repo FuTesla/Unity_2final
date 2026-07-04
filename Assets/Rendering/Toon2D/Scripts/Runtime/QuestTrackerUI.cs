@@ -327,16 +327,9 @@ public sealed class QuestTrackerUI : MonoBehaviour
 
     private Bounds GetObjectiveBounds()
     {
-        var size = objectiveZone != null
-            ? objectiveZone.zoneSize
-            : new Vector3(6f, 4f, 6f);
-
-        var bounds = new Bounds(
-            objectiveTransform.position,
-            new Vector3(
-                Mathf.Max(size.x, 0.1f) + 1.5f,
-                Mathf.Max(size.y, 0.1f) + 2f,
-                Mathf.Max(size.z, 0.1f) + 1.5f));
+        var bounds = objectiveZone != null
+            ? objectiveZone.GetWorldBounds(new Vector3(1.5f, 2f, 1.5f))
+            : new Bounds(objectiveTransform.position, new Vector3(7.5f, 6f, 7.5f));
 
         var renderers = objectiveTransform.GetComponentsInChildren<Renderer>();
         foreach (var renderer in renderers)

@@ -51,7 +51,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     private float unarmedAttackReadyTime;
     private float lastUnarmedAttackEndTime = float.NegativeInfinity;
     private int unarmedAttackIndex;
-    private bool isWeaponDrawn = true;
+    private bool isWeaponDrawn;
 
     public float MoveAmount { get; private set; }
     public bool IsRunning { get; private set; }

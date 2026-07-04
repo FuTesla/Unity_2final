@@ -4,7 +4,11 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class QuestObjectiveZone : MonoBehaviour
 {
+    [Header("Editable Zone")]
+    public Vector3 zoneCenter = Vector3.zero;
     public Vector3 zoneSize = new Vector3(4.2f, 2.6f, 4.2f);
+
+    [Header("Quest")]
     public string requiredQuestText = "\u7EE7\u7EED\u5411\u524D\u63A2\u7D22";
     public string completionText = "\u4EFB\u52A1\u5B8C\u6210";
 
@@ -51,6 +55,18 @@ public sealed class QuestObjectiveZone : MonoBehaviour
         TryCompleteQuestFromCollider(other);
     }
 
+    public Bounds GetWorldBounds(Vector3 padding)
+    {
+        var worldSize = Vector3.Scale(
+            new Vector3(
+                Mathf.Max(zoneSize.x, 0.1f),
+                Mathf.Max(zoneSize.y, 0.1f),
+                Mathf.Max(zoneSize.z, 0.1f)),
+            Abs(transform.lossyScale));
+
+        return new Bounds(transform.TransformPoint(zoneCenter), worldSize + padding);
+    }
+
     private void EnsureZoneSetup()
     {
         EnsureTriggerCollider();
@@ -72,7 +88,7 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
         triggerCollider.enabled = true;
         triggerCollider.isTrigger = true;
-        triggerCollider.center = Vector3.zero;
+        triggerCollider.center = zoneCenter;
         triggerCollider.size = zoneSize;
 
         if (triggerBody == null)
@@ -124,7 +140,7 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
         RemoveVisualColliders();
 
-        visualRoot.localPosition = Vector3.zero;
+        visualRoot.localPosition = zoneCenter;
         visualRoot.localRotation = Quaternion.identity;
         visualRoot.localScale = zoneSize;
 
@@ -222,12 +238,7 @@ public sealed class QuestObjectiveZone : MonoBehaviour
             playerController = playerMotor.GetComponent<CharacterController>();
         }
 
-        var zoneBounds = new Bounds(
-            transform.position,
-            new Vector3(
-                Mathf.Max(zoneSize.x, 0.1f) + 0.8f,
-                Mathf.Max(zoneSize.y, 0.1f) + 1.2f,
-                Mathf.Max(zoneSize.z, 0.1f) + 0.8f));
+        var zoneBounds = GetWorldBounds(new Vector3(0.8f, 1.2f, 0.8f));
 
         var insideZone = playerController != null
             ? zoneBounds.Intersects(playerController.bounds)
@@ -240,6 +251,11 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
         isCompleted = true;
         QuestTrackerUI.ShowCompletedQuest(requiredQuestText, completionText);
+    }
+
+    private static Vector3 Abs(Vector3 value)
+    {
+        return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
     }
 
     private void TryCompleteQuestFromCollider(Collider other)

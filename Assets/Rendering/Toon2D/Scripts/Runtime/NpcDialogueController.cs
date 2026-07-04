@@ -16,6 +16,7 @@ public sealed class NpcDialogueController : MonoBehaviour
     public IsometricCameraFollow cameraFollow;
     public Camera mainCamera;
     public float dialogueOrthographicSize = 2.15f;
+    public float dialoguePerspectiveFieldOfView = 8f;
     public float cameraTransitionDuration = 0.65f;
     public float returnCameraTransitionDuration = 0.55f;
 
@@ -49,12 +50,14 @@ public sealed class NpcDialogueController : MonoBehaviour
     private static Font readableFont;
     private static Sprite roundedRectSprite;
     private float previousCameraSize;
+    private float previousCameraFieldOfView;
     private Coroutine cameraTransition;
     private bool previousMotorEnabled;
     private int lineIndex;
     private bool isTalking;
     private bool isCameraTransitioning;
     private bool hasCameraSnapshot;
+    private bool previousCameraWasOrthographic;
     private bool dialogueCompleted;
     private bool questIssued;
 
@@ -136,12 +139,17 @@ public sealed class NpcDialogueController : MonoBehaviour
 
         if (mainCamera != null)
         {
+            previousCameraWasOrthographic = mainCamera.orthographic;
             previousCameraSize = mainCamera.orthographicSize;
+            previousCameraFieldOfView = mainCamera.fieldOfView;
             hasCameraSnapshot = true;
         }
 
-        var startSize = mainCamera != null ? mainCamera.orthographicSize : previousCameraSize;
-        BeginCameraTransition(startSize, dialogueOrthographicSize, cameraTransitionDuration, null);
+        var startFrame = GetCurrentCameraFrame();
+        var dialogueFrame = mainCamera != null && !mainCamera.orthographic
+            ? dialoguePerspectiveFieldOfView
+            : dialogueOrthographicSize;
+        BeginCameraTransition(startFrame, dialogueFrame, cameraTransitionDuration, null);
 
         ShowDialogueUi();
         ShowCurrentLine();
@@ -181,8 +189,9 @@ public sealed class NpcDialogueController : MonoBehaviour
             questIssued = true;
         }
 
-        var startSize = mainCamera != null ? mainCamera.orthographicSize : dialogueOrthographicSize;
-        BeginCameraTransition(startSize, previousCameraSize, returnCameraTransitionDuration, FinishDialogueReturn);
+        var startFrame = GetCurrentCameraFrame();
+        var returnFrame = previousCameraWasOrthographic ? previousCameraSize : previousCameraFieldOfView;
+        BeginCameraTransition(startFrame, returnFrame, returnCameraTransitionDuration, FinishDialogueReturn);
     }
 
     private void ShowCurrentLine()
@@ -266,7 +275,7 @@ public sealed class NpcDialogueController : MonoBehaviour
         dialogueText.rectTransform.anchorMax = Vector2.one;
         dialogueText.rectTransform.offsetMin = new Vector2(44f, 30f);
         dialogueText.rectTransform.offsetMax = new Vector2(-44f, -30f);
-        dialogueText.alignment = TextAnchor.MiddleLeft;
+        dialogueText.alignment = TextAnchor.MiddleCenter;
     }
 
     private void HideStaleDialogueHud()
@@ -452,11 +461,30 @@ public sealed class NpcDialogueController : MonoBehaviour
         onComplete?.Invoke();
     }
 
-    private void ApplyCameraFrame(float orthographicSize)
+    private float GetCurrentCameraFrame()
     {
-        if (mainCamera != null && orthographicSize > 0f)
+        if (mainCamera == null)
         {
-            mainCamera.orthographicSize = orthographicSize;
+            return previousCameraWasOrthographic ? previousCameraSize : previousCameraFieldOfView;
+        }
+
+        return mainCamera.orthographic ? mainCamera.orthographicSize : mainCamera.fieldOfView;
+    }
+
+    private void ApplyCameraFrame(float cameraFrame)
+    {
+        if (mainCamera == null || cameraFrame <= 0f)
+        {
+            return;
+        }
+
+        if (mainCamera.orthographic)
+        {
+            mainCamera.orthographicSize = cameraFrame;
+        }
+        else
+        {
+            mainCamera.fieldOfView = Mathf.Clamp(cameraFrame, 1f, 179f);
         }
     }
 
@@ -484,9 +512,16 @@ public sealed class NpcDialogueController : MonoBehaviour
             cameraFollow.ResetVelocity();
         }
 
-        if (mainCamera != null && previousCameraSize > 0f)
+        if (mainCamera != null)
         {
-            mainCamera.orthographicSize = previousCameraSize;
+            if (previousCameraWasOrthographic && previousCameraSize > 0f)
+            {
+                mainCamera.orthographicSize = previousCameraSize;
+            }
+            else if (previousCameraFieldOfView > 0f)
+            {
+                mainCamera.fieldOfView = previousCameraFieldOfView;
+            }
         }
 
         hasCameraSnapshot = false;

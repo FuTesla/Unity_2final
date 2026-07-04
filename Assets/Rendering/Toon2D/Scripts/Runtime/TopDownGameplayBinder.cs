@@ -17,7 +17,9 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
     public string animatorControllerPath = "Assets/Gameplay/AnimationControllers/AC_Medieval_Player.controller";
 
     [Header("Camera")]
-    public Vector3 cameraOffset = new Vector3(-5f, 7.1f, -5f);
+    public Vector3 cameraOffset = new Vector3(-24.5f, 34.8f, -24.5f);
+    public float perspectiveFieldOfView = 14f;
+    public float perspectiveFocalLength = 145f;
 
     [Header("Attack Test Enemy")]
     public string attackTestEnemyName = "Enemy_Stand";
@@ -145,8 +147,11 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
         var camera = GetComponent<Camera>();
         if (camera != null)
         {
-            camera.orthographic = true;
-            camera.orthographicSize = 6f;
+            camera.orthographic = false;
+            camera.fieldOfView = perspectiveFieldOfView;
+            camera.focalLength = perspectiveFocalLength;
+            camera.nearClipPlane = 0.1f;
+            camera.farClipPlane = Mathf.Max(camera.farClipPlane, 1000f);
         }
     }
 
