@@ -20,6 +20,8 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
     public Vector3 cameraOffset = new Vector3(-24.5f, 34.8f, -24.5f);
     public float perspectiveFieldOfView = 14f;
     public float perspectiveFocalLength = 145f;
+    public bool disableCameraHdr = true;
+    public string skyLightRootName = "P_Sky";
 
     [Header("Attack Test Enemy")]
     public string attackTestEnemyName = "Enemy_Stand";
@@ -38,6 +40,7 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
             return;
         }
 
+        RestrictSkyLights();
         BindCharacter(target);
         BindCamera(target);
         BindAttackTestEnemy();
@@ -144,14 +147,43 @@ public sealed class TopDownGameplayBinder : MonoBehaviour
         follow.offset = cameraOffset;
         follow.lockRotation = true;
 
+        var occlusionFader = GetComponent<CameraOcclusionFader>();
+        if (occlusionFader == null)
+        {
+            occlusionFader = gameObject.AddComponent<CameraOcclusionFader>();
+        }
+
+        occlusionFader.target = target;
+
         var camera = GetComponent<Camera>();
         if (camera != null)
         {
             camera.orthographic = false;
+            camera.allowHDR = !disableCameraHdr;
             camera.fieldOfView = perspectiveFieldOfView;
             camera.focalLength = perspectiveFocalLength;
             camera.nearClipPlane = 0.1f;
             camera.farClipPlane = Mathf.Max(camera.farClipPlane, 1000f);
+        }
+    }
+
+    private void RestrictSkyLights()
+    {
+        if (string.IsNullOrWhiteSpace(skyLightRootName))
+        {
+            return;
+        }
+
+        var skyRoot = GameObject.Find(skyLightRootName);
+        if (skyRoot == null)
+        {
+            return;
+        }
+
+        var skyLayerMask = 1 << skyRoot.layer;
+        foreach (var light in skyRoot.GetComponentsInChildren<Light>(true))
+        {
+            light.cullingMask = skyLayerMask;
         }
     }
 

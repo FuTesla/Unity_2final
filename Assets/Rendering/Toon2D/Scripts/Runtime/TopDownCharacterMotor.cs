@@ -1,8 +1,16 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 [RequireComponent(typeof(CharacterController))]
 public sealed class TopDownCharacterMotor : MonoBehaviour
 {
+    public enum WeaponType
+    {
+        Unarmed,
+        Sword,
+        Handgun
+    }
+
     [Header("Movement")]
     public float walkSpeed = 3.2f;
     public float runSpeed = 5.8f;
@@ -40,6 +48,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     public float attackRadius = 0.85f;
     public string attackTestEnemyName = "Enemy_Stand";
     public float fallbackAttackExtraRange = 0.75f;
+    public WeaponType currentWeapon = WeaponType.Unarmed;
 
     private CharacterController characterController;
     private Animator animator;
@@ -51,7 +60,8 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     private float unarmedAttackReadyTime;
     private float lastUnarmedAttackEndTime = float.NegativeInfinity;
     private int unarmedAttackIndex;
-    private bool isWeaponDrawn;
+
+    public WeaponType CurrentWeaponType => currentWeapon;
 
     public float MoveAmount { get; private set; }
     public bool IsRunning { get; private set; }
@@ -67,7 +77,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         swordObject = FindDeepChild(transform, swordObjectName);
-        SetSwordVisible(isWeaponDrawn);
+        ApplyWeaponVisuals();
 
         var initialEuler = transform.eulerAngles;
         basePitch = initialEuler.x;
@@ -111,12 +121,17 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             ToggleWeapon();
         }
 
-        if (!isWeaponDrawn)
+        if (currentWeapon == WeaponType.Unarmed)
         {
             UpdateUnarmedComboTimeout();
         }
 
-        if (isWeaponDrawn && Input.GetMouseButtonDown(0))
+        if (Input.GetMouseButtonDown(0) && IsPointerOverUi())
+        {
+            return;
+        }
+
+        if (currentWeapon == WeaponType.Sword && Input.GetMouseButtonDown(0))
         {
             if (TryPlaySwordAttack())
             {
@@ -124,7 +139,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             }
         }
 
-        if (!isWeaponDrawn && Input.GetMouseButtonDown(0))
+        if (currentWeapon == WeaponType.Unarmed && Input.GetMouseButtonDown(0))
         {
             if (TryPlayNextUnarmedAttack(out var damage))
             {
@@ -140,12 +155,37 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
 
     private void ToggleWeapon()
     {
-        isWeaponDrawn = !isWeaponDrawn;
-        SetSwordVisible(isWeaponDrawn);
+        SetWeaponType(currentWeapon == WeaponType.Sword ? WeaponType.Unarmed : WeaponType.Sword);
+    }
+
+    public void SetWeaponType(WeaponType weaponType)
+    {
+        currentWeapon = weaponType;
+        ApplyWeaponVisuals();
         unarmedAttackIndex = 0;
         swordAttackReadyTime = 0f;
         unarmedAttackReadyTime = 0f;
         lastUnarmedAttackEndTime = float.NegativeInfinity;
+    }
+
+    public void SelectUnarmed()
+    {
+        SetWeaponType(WeaponType.Unarmed);
+    }
+
+    public void SelectSword()
+    {
+        SetWeaponType(WeaponType.Sword);
+    }
+
+    public void SelectHandgun()
+    {
+        SetWeaponType(WeaponType.Handgun);
+    }
+
+    private void ApplyWeaponVisuals()
+    {
+        SetSwordVisible(currentWeapon == WeaponType.Sword);
     }
 
     private void SetSwordVisible(bool visible)
@@ -489,5 +529,10 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static bool IsPointerOverUi()
+    {
+        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
     }
 }
