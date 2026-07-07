@@ -218,7 +218,7 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
     private void TryCompleteQuestFromPlayerPosition()
     {
-        if (isCompleted)
+        if (isCompleted || !CanCompleteCurrentQuest())
         {
             return;
         }
@@ -260,7 +260,7 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
     private void TryCompleteQuestFromCollider(Collider other)
     {
-        if (isCompleted || other == null)
+        if (isCompleted || other == null || !CanCompleteCurrentQuest())
         {
             return;
         }
@@ -272,5 +272,16 @@ public sealed class QuestObjectiveZone : MonoBehaviour
 
         isCompleted = true;
         QuestTrackerUI.ShowCompletedQuest(requiredQuestText, completionText);
+    }
+
+    private bool CanCompleteCurrentQuest()
+    {
+        if (!QuestTrackerUI.HasActiveQuest || QuestTrackerUI.IsCompleted)
+        {
+            return false;
+        }
+
+        return string.IsNullOrWhiteSpace(requiredQuestText)
+            || QuestTrackerUI.IsCurrentQuest(requiredQuestText);
     }
 }

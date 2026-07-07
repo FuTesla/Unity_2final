@@ -73,3 +73,20 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Local imported art/source assets that are intentionally kept out of git.
+/[Aa]ssets/[Aa]rt/[Mm]odels/bridge.meta
+/[Aa]ssets/[Aa]rt/[Mm]odels/door.meta
+/[Aa]ssets/[Aa]rt/[Mm]odels/door/
+/[Aa]ssets/[Aa]rt/[Mm]odels/pavilion_lvl1.meta
+/[Aa]ssets/[Aa]rt/[Mm]odels/pavilion_lvl1/
+/[Aa]ssets/[Aa]rt/[Mm]odels/seaDoor.meta
+/[Aa]ssets/[Aa]rt/[Mm]odels/seaDoor/
+/[Aa]ssets/[Aa]rt/book&box&key.meta
+/[Aa]ssets/[Aa]rt/book&box&key/
+/[Aa]ssets/[Aa]rt/bridge&fish.meta
+/[Aa]ssets/[Aa]rt/bridge&fish/
+/[Aa]ssets/[Pp]olybrush Data.meta
+/[Aa]ssets/[Pp]olybrush Data/
+/[Aa]ssets/[Tt]errain.meta
+/[Aa]ssets/[Tt]errain/

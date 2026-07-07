@@ -100,6 +100,7 @@ public sealed class EnemyHealth : MonoBehaviour
     private void Die()
     {
         isDead = true;
+        ResolveRuntimeReferences();
 
         if (aiController != null)
         {
@@ -128,6 +129,24 @@ public sealed class EnemyHealth : MonoBehaviour
         if (!string.IsNullOrEmpty(deathStateName))
         {
             animator.CrossFadeInFixedTime(deathStateName, 0.05f);
+        }
+    }
+
+    private void ResolveRuntimeReferences()
+    {
+        if (aiController == null)
+        {
+            aiController = GetComponent<EnemyAIController>();
+        }
+
+        if (characterController == null)
+        {
+            characterController = GetComponent<CharacterController>();
+        }
+
+        if (animator == null)
+        {
+            animator = GetComponentInChildren<Animator>();
         }
     }
 

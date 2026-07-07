@@ -4,6 +4,8 @@ using UnityEngine.UI;
 public sealed class AttackTestEnemyBootstrap : MonoBehaviour
 {
     public string enemyName = "Enemy_Stand";
+    public string[] exactEnemyNames = { "Enemy_Stand", "Enemy_Suit" };
+    public string[] enemyNameTokens = { "Enemy", "Boss", "Monster" };
     public float enemyRadius = 0.35f;
     public float enemyHeight = 1.8f;
     public Vector3 enemyCenter = new Vector3(0f, 0.9f, 0f);
@@ -19,14 +21,51 @@ public sealed class AttackTestEnemyBootstrap : MonoBehaviour
 
     private void Start()
     {
-        BindEnemyStand();
+        BindSceneEnemies();
         Destroy(gameObject);
     }
 
-    private void BindEnemyStand()
+    private void BindSceneEnemies()
     {
-        var enemy = FindExactTransform(enemyName);
+        var enemies = new System.Collections.Generic.List<Transform>();
+        AddEnemyCandidate(enemies, FindExactTransform(enemyName));
+        for (var i = 0; i < exactEnemyNames.Length; i++)
+        {
+            AddEnemyCandidate(enemies, FindExactTransform(exactEnemyNames[i]));
+        }
+
+        foreach (var health in FindObjectsOfType<EnemyHealth>(true))
+        {
+            AddEnemyCandidate(enemies, health.transform);
+        }
+
+        foreach (var ai in FindObjectsOfType<EnemyAIController>(true))
+        {
+            AddEnemyCandidate(enemies, ai.transform);
+        }
+
+        foreach (var candidate in FindObjectsOfType<Transform>(true))
+        {
+            if (IsLikelyEnemy(candidate))
+            {
+                AddEnemyCandidate(enemies, candidate);
+            }
+        }
+
+        for (var i = 0; i < enemies.Count; i++)
+        {
+            BindEnemy(enemies[i]);
+        }
+    }
+
+    private void BindEnemy(Transform enemy)
+    {
         if (enemy == null)
+        {
+            return;
+        }
+
+        if (enemy.GetComponent<TopDownCharacterMotor>() != null || enemy.GetComponent<PlayerHealth>() != null)
         {
             return;
         }
@@ -43,6 +82,11 @@ public sealed class AttackTestEnemyBootstrap : MonoBehaviour
         controller.stepOffset = 0.35f;
         controller.slopeLimit = 45f;
         controller.skinWidth = 0.04f;
+
+        if (enemy.GetComponent<EnemyAIController>() == null)
+        {
+            enemy.gameObject.AddComponent<EnemyAIController>();
+        }
 
         var health = enemy.GetComponent<EnemyHealth>();
         if (health == null)
@@ -76,7 +120,7 @@ public sealed class AttackTestEnemyBootstrap : MonoBehaviour
 
     private void CreateHealthBar(Transform enemy, EnemyHealth health)
     {
-        var canvasObject = new GameObject("Enemy Stand Health Bar", typeof(RectTransform), typeof(Canvas), typeof(EnemyHealthBar));
+        var canvasObject = new GameObject($"{enemy.name} Health Bar", typeof(RectTransform), typeof(Canvas), typeof(EnemyHealthBar));
         canvasObject.transform.SetParent(enemy, false);
         canvasObject.transform.localPosition = healthBarOffset;
         canvasObject.transform.localRotation = Quaternion.identity;
@@ -104,6 +148,40 @@ public sealed class AttackTestEnemyBootstrap : MonoBehaviour
         healthBar.target = health;
         healthBar.fillImage = fill;
         healthBar.targetCamera = Camera.main;
+    }
+
+    private static void AddEnemyCandidate(System.Collections.Generic.List<Transform> enemies, Transform enemy)
+    {
+        if (enemy == null)
+        {
+            return;
+        }
+
+        var root = enemy.root != null ? enemy.root : enemy;
+        if (!enemies.Contains(root))
+        {
+            enemies.Add(root);
+        }
+    }
+
+    private bool IsLikelyEnemy(Transform candidate)
+    {
+        if (candidate == null || candidate.GetComponentInParent<TopDownCharacterMotor>() != null)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < enemyNameTokens.Length; i++)
+        {
+            var token = enemyNameTokens[i];
+            if (!string.IsNullOrWhiteSpace(token)
+                && candidate.name.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Image CreateHealthBarImage(string name, RectTransform parent, Color color)

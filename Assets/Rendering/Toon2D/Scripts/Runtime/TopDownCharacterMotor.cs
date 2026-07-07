@@ -1,11 +1,22 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 [RequireComponent(typeof(CharacterController))]
 public sealed class TopDownCharacterMotor : MonoBehaviour
 {
+    private const float MinimumRunSpeed = 6.4f;
+    private const float MinimumRunAnimationSpeedMultiplier = 1.12f;
+
+    public enum WeaponType
+    {
+        Unarmed,
+        Sword,
+        Handgun
+    }
+
     [Header("Movement")]
     public float walkSpeed = 3.2f;
-    public float runSpeed = 5.8f;
+    public float runSpeed = 6.4f;
     public float rotationSpeed = 720f;
     public float gravity = -20f;
     public KeyCode runKey = KeyCode.LeftShift;
@@ -28,6 +39,9 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     public float fallbackUnarmedAttackDuration = 0.85f;
     public KeyCode interactKey = KeyCode.F;
     public string interactTrigger = "Interact";
+    public string interactStateName = "Interact";
+    public float fallbackInteractDuration = 0.8f;
+    public float runAnimationSpeedMultiplier = 1.12f;
 
     [Header("Combat")]
     public KeyCode toggleWeaponKey = KeyCode.X;
@@ -40,6 +54,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     public float attackRadius = 0.85f;
     public string attackTestEnemyName = "Enemy_Stand";
     public float fallbackAttackExtraRange = 0.75f;
+    public WeaponType currentWeapon = WeaponType.Unarmed;
 
     private CharacterController characterController;
     private Animator animator;
@@ -49,9 +64,11 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     private float baseRoll;
     private float swordAttackReadyTime;
     private float unarmedAttackReadyTime;
+    private float interactAnimationEndTime;
     private float lastUnarmedAttackEndTime = float.NegativeInfinity;
     private int unarmedAttackIndex;
-    private bool isWeaponDrawn;
+
+    public WeaponType CurrentWeaponType => currentWeapon;
 
     public float MoveAmount { get; private set; }
     public bool IsRunning { get; private set; }
@@ -59,6 +76,9 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
     private void Awake()
     {
         characterController = GetComponent<CharacterController>();
+        runSpeed = Mathf.Max(runSpeed, MinimumRunSpeed);
+        runAnimationSpeedMultiplier = Mathf.Max(runAnimationSpeedMultiplier, MinimumRunAnimationSpeedMultiplier);
+
         animator = GetComponentInChildren<Animator>();
         if (animator != null && animatorController != null)
         {
@@ -67,7 +87,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         swordObject = FindDeepChild(transform, swordObjectName);
-        SetSwordVisible(isWeaponDrawn);
+        ApplyWeaponVisuals();
 
         var initialEuler = transform.eulerAngles;
         basePitch = initialEuler.x;
@@ -104,19 +124,31 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             transform.rotation = Quaternion.Euler(basePitch, nextYaw, baseRoll);
         }
 
-        UpdateAnimator(input.magnitude, isRunning);
+        if (Time.time < interactAnimationEndTime)
+        {
+            SetMovementAnimationStopped();
+        }
+        else
+        {
+            UpdateAnimator(input.magnitude, isRunning);
+        }
 
         if (Input.GetKeyDown(toggleWeaponKey))
         {
             ToggleWeapon();
         }
 
-        if (!isWeaponDrawn)
+        if (currentWeapon == WeaponType.Unarmed)
         {
             UpdateUnarmedComboTimeout();
         }
 
-        if (isWeaponDrawn && Input.GetMouseButtonDown(0))
+        if (Input.GetMouseButtonDown(0) && IsPointerOverUi())
+        {
+            return;
+        }
+
+        if (currentWeapon == WeaponType.Sword && Input.GetMouseButtonDown(0))
         {
             if (TryPlaySwordAttack())
             {
@@ -124,7 +156,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             }
         }
 
-        if (!isWeaponDrawn && Input.GetMouseButtonDown(0))
+        if (currentWeapon == WeaponType.Unarmed && Input.GetMouseButtonDown(0))
         {
             if (TryPlayNextUnarmedAttack(out var damage))
             {
@@ -134,18 +166,43 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
 
         if (Input.GetKeyDown(interactKey))
         {
-            SetTriggerIfExists(interactTrigger);
+            PlayInteractAnimation();
         }
     }
 
     private void ToggleWeapon()
     {
-        isWeaponDrawn = !isWeaponDrawn;
-        SetSwordVisible(isWeaponDrawn);
+        SetWeaponType(currentWeapon == WeaponType.Sword ? WeaponType.Unarmed : WeaponType.Sword);
+    }
+
+    public void SetWeaponType(WeaponType weaponType)
+    {
+        currentWeapon = weaponType;
+        ApplyWeaponVisuals();
         unarmedAttackIndex = 0;
         swordAttackReadyTime = 0f;
         unarmedAttackReadyTime = 0f;
         lastUnarmedAttackEndTime = float.NegativeInfinity;
+    }
+
+    public void SelectUnarmed()
+    {
+        SetWeaponType(WeaponType.Unarmed);
+    }
+
+    public void SelectSword()
+    {
+        SetWeaponType(WeaponType.Sword);
+    }
+
+    public void SelectHandgun()
+    {
+        SetWeaponType(WeaponType.Handgun);
+    }
+
+    private void ApplyWeaponVisuals()
+    {
+        SetSwordVisible(currentWeapon == WeaponType.Sword);
     }
 
     private void SetSwordVisible(bool visible)
@@ -181,12 +238,8 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             return false;
         }
 
-        SetFloatIfExists("Speed", 0f);
-        SetFloatIfExists("MoveSpeed", 0f);
-        SetBoolIfExists("IsMoving", false);
-        SetBoolIfExists("Moving", false);
-        SetBoolIfExists("IsRunning", false);
-        SetBoolIfExists("Running", false);
+        SetMovementAnimationStopped();
+        SetAnimatorSpeed(1f);
 
         swordAttackReadyTime = Time.time + GetAttackDuration(swordAttackStateName, "Sword_Slash", fallbackSwordAttackDuration);
 
@@ -209,12 +262,8 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
 
         UpdateUnarmedComboTimeout();
 
-        SetFloatIfExists("Speed", 0f);
-        SetFloatIfExists("MoveSpeed", 0f);
-        SetBoolIfExists("IsMoving", false);
-        SetBoolIfExists("Moving", false);
-        SetBoolIfExists("IsRunning", false);
-        SetBoolIfExists("Running", false);
+        SetMovementAnimationStopped();
+        SetAnimatorSpeed(1f);
 
         string stateName;
         switch (unarmedAttackIndex)
@@ -267,6 +316,46 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         return fallbackDuration;
+    }
+
+    private void PlayInteractAnimation()
+    {
+        SetMovementAnimationStopped();
+        SetAnimatorSpeed(1f);
+        SetTriggerIfExists(interactTrigger);
+
+        var duration = GetAnimationDuration(interactStateName, "Interact", fallbackInteractDuration);
+        interactAnimationEndTime = Time.time + duration;
+
+        if (animator != null && HasAnimatorState(interactStateName))
+        {
+            animator.CrossFadeInFixedTime(interactStateName, 0.05f, 0, 0f);
+        }
+    }
+
+    private float GetAnimationDuration(string stateName, string clipToken, float fallbackDuration)
+    {
+        if (animator == null || animator.runtimeAnimatorController == null || string.IsNullOrEmpty(stateName))
+        {
+            return fallbackDuration;
+        }
+
+        foreach (var clip in animator.runtimeAnimatorController.animationClips)
+        {
+            if (clip != null && clip.name.IndexOf(clipToken, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return Mathf.Max(0.05f, clip.length);
+            }
+        }
+
+        return fallbackDuration;
+    }
+
+    private bool HasAnimatorState(string stateName)
+    {
+        return animator != null
+            && !string.IsNullOrEmpty(stateName)
+            && animator.HasState(0, Animator.StringToHash(stateName));
     }
 
     private string GetUnarmedClipToken(string stateName)
@@ -405,6 +494,7 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
             return;
         }
 
+        SetAnimatorSpeed(isRunning ? runAnimationSpeedMultiplier : 1f);
         var speed01 = inputAmount <= 0.05f ? 0f : isRunning ? 1f : 0.5f;
         SetFloatIfExists("Speed", speed01);
         SetFloatIfExists("MoveSpeed", speed01);
@@ -412,6 +502,24 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         SetBoolIfExists("Moving", speed01 > 0.05f);
         SetBoolIfExists("IsRunning", isRunning);
         SetBoolIfExists("Running", isRunning);
+    }
+
+    private void SetMovementAnimationStopped()
+    {
+        SetFloatIfExists("Speed", 0f);
+        SetFloatIfExists("MoveSpeed", 0f);
+        SetBoolIfExists("IsMoving", false);
+        SetBoolIfExists("Moving", false);
+        SetBoolIfExists("IsRunning", false);
+        SetBoolIfExists("Running", false);
+    }
+
+    private void SetAnimatorSpeed(float speed)
+    {
+        if (animator != null)
+        {
+            animator.speed = speed;
+        }
     }
 
     private void SetFloatIfExists(string parameterName, float value)
@@ -489,5 +597,10 @@ public sealed class TopDownCharacterMotor : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static bool IsPointerOverUi()
+    {
+        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
     }
 }

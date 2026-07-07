@@ -74,7 +74,7 @@ public sealed class DamagePopup : MonoBehaviour
         text = GetComponent<Text>();
         text.text = FormatAmount(amount);
         text.alignment = TextAnchor.MiddleCenter;
-        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.font = GameFontUtility.GetUIFont();
         text.fontSize = 34;
         text.fontStyle = FontStyle.Bold;
         text.color = Color.red;

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -19,6 +20,7 @@ public sealed class PauseMenuController : MonoBehaviour
 
     private const string PauseHudName = "Pause HUD";
     private const string PauseRootName = "Pause Root";
+    private const string BackgroundBlurVolumeName = "Pause Background Blur Volume";
     private static PauseMenuController activeController;
     private static GameObject sharedPauseRoot;
     private static Font readableFont;
@@ -30,6 +32,11 @@ public sealed class PauseMenuController : MonoBehaviour
     private bool previousCursorVisible;
     private CursorLockMode previousCursorLockMode;
     private MenuMode currentMode = MenuMode.Pause;
+    private Volume backgroundBlurVolume;
+    private VolumeProfile backgroundBlurProfile;
+    private Component mainCameraAdditionalData;
+    private bool previousPostProcessingEnabled;
+    private bool hasPostProcessingSnapshot;
 
     public bool IsPaused => isPaused;
 
@@ -67,6 +74,10 @@ public sealed class PauseMenuController : MonoBehaviour
         if (isPaused)
         {
             SetPaused(false, true);
+        }
+        else
+        {
+            SetBackgroundBlur(false);
         }
 
         if (activeController == this)
@@ -172,6 +183,8 @@ public sealed class PauseMenuController : MonoBehaviour
             pauseRoot.SetActive(paused);
         }
 
+        SetBackgroundBlur(paused);
+
         if (motor != null)
         {
             motor.enabled = paused ? false : restoreMotorEnabled;
@@ -240,7 +253,7 @@ public sealed class PauseMenuController : MonoBehaviour
         Stretch(root);
         ClearChildren(root);
 
-        var veil = CreateImage("Pause Veil", root, new Color(0f, 0f, 0f, 0.42f));
+        var veil = CreateImage("Pause Veil", root, new Color(0f, 0f, 0f, 0.28f));
         Stretch(veil.rectTransform);
         veil.rectTransform.SetAsFirstSibling();
         veil.raycastTarget = true;
@@ -250,34 +263,41 @@ public sealed class PauseMenuController : MonoBehaviour
         panel.anchorMax = new Vector2(0.5f, 0.5f);
         panel.pivot = new Vector2(0.5f, 0.5f);
         panel.anchoredPosition = Vector2.zero;
-        panel.sizeDelta = new Vector2(540f, 430f);
+        panel.sizeDelta = mode == MenuMode.Pause
+            ? new Vector2(1080f, 560f)
+            : new Vector2(540f, 430f);
+
+        var controlsX = mode == MenuMode.Pause ? -280f : 0f;
+        var controlWidth = mode == MenuMode.Pause ? 440f : 540f;
 
         var titleValue = mode == MenuMode.Death ? "\u518d\u6765\u4e00\u6b21\uff1f" : "\u6e38\u620f\u6682\u505c";
         var title = CreateText("Pause Title", panel, titleValue, 48, FontStyle.Bold, Color.white);
-        title.rectTransform.anchorMin = new Vector2(0f, 1f);
-        title.rectTransform.anchorMax = new Vector2(1f, 1f);
+        title.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        title.rectTransform.anchorMax = new Vector2(0.5f, 1f);
         title.rectTransform.pivot = new Vector2(0.5f, 1f);
-        title.rectTransform.anchoredPosition = new Vector2(0f, -48f);
-        title.rectTransform.sizeDelta = new Vector2(-72f, 72f);
+        title.rectTransform.anchoredPosition = new Vector2(controlsX, -48f);
+        title.rectTransform.sizeDelta = new Vector2(controlWidth, 72f);
 
         var hintValue = mode == MenuMode.Death ? "\u4f60\u5df2\u5012\u4e0b" : "\u6309 ESC \u7ee7\u7eed\u6e38\u620f";
         var hint = CreateText("Pause Hint", panel, hintValue, 24, FontStyle.Normal, new Color(0.78f, 0.82f, 0.88f, 1f));
-        hint.rectTransform.anchorMin = new Vector2(0f, 1f);
-        hint.rectTransform.anchorMax = new Vector2(1f, 1f);
+        hint.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        hint.rectTransform.anchorMax = new Vector2(0.5f, 1f);
         hint.rectTransform.pivot = new Vector2(0.5f, 1f);
-        hint.rectTransform.anchoredPosition = new Vector2(0f, -126f);
-        hint.rectTransform.sizeDelta = new Vector2(-72f, 42f);
+        hint.rectTransform.anchoredPosition = new Vector2(controlsX, -126f);
+        hint.rectTransform.sizeDelta = new Vector2(controlWidth, 42f);
 
         if (mode == MenuMode.Pause)
         {
+            CreateKeyGuide(panel);
+
             var resume = CreateButton("Resume Button", panel, "\u7ee7\u7eed\u6e38\u620f");
-            resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -42f);
+            resume.GetComponent<RectTransform>().anchoredPosition = new Vector2(controlsX, -42f);
 
             var restart = CreateButton("Restart Button", panel, "\u91cd\u65b0\u5f00\u59cb");
-            restart.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -118f);
+            restart.GetComponent<RectTransform>().anchoredPosition = new Vector2(controlsX, -118f);
 
             var quit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
-            quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -194f);
+            quit.GetComponent<RectTransform>().anchoredPosition = new Vector2(controlsX, -194f);
             return;
         }
 
@@ -286,6 +306,36 @@ public sealed class PauseMenuController : MonoBehaviour
 
         var deathQuit = CreateButton("Quit Button", panel, "\u9000\u51fa\u6e38\u620f");
         deathQuit.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -158f);
+    }
+
+    private static void CreateKeyGuide(Transform parent)
+    {
+        var guide = CreateImage("Pause Key Guide", parent, new Color(0f, 0f, 0f, 0.92f));
+        guide.material = Graphic.defaultGraphicMaterial;
+        guide.raycastTarget = false;
+
+        var guideRect = guide.rectTransform;
+        guideRect.anchorMin = new Vector2(0.5f, 0.5f);
+        guideRect.anchorMax = new Vector2(0.5f, 0.5f);
+        guideRect.pivot = new Vector2(0.5f, 0.5f);
+        guideRect.anchoredPosition = new Vector2(275f, -8f);
+        guideRect.sizeDelta = new Vector2(500f, 470f);
+
+        var guideText = CreateText(
+            "Pause Key Guide Text",
+            guideRect,
+            "\u6309\u952E\u8BF4\u660E\n\nWASD  \u79FB\u52A8\n\u9F20\u6807  \u8C03\u6574\u89C6\u89D2\nLeft Shift  \u5954\u8DD1\n\u9F20\u6807\u5DE6\u952E  \u653B\u51FB\nX  \u5207\u6362\u5F92\u624B/\u6B66\u5668\nF  \u4EA4\u4E92/\u6253\u5F00\u5B9D\u7BB1/\u9605\u8BFB\nTab  \u80CC\u5305\nJ  \u4EFB\u52A1\u5217\u8868\nEsc  \u6682\u505C/\u8FD4\u56DE\n\u5173\u53612\u4E66\u672C\u5904\uFF1AF \u540E R \u76F4\u63A5\u8FD4\u56DE\u5173\u53611",
+            23,
+            FontStyle.Bold,
+            Color.white);
+
+        guideText.alignment = TextAnchor.UpperLeft;
+        guideText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        guideText.verticalOverflow = VerticalWrapMode.Overflow;
+        guideText.rectTransform.anchorMin = Vector2.zero;
+        guideText.rectTransform.anchorMax = Vector2.one;
+        guideText.rectTransform.offsetMin = new Vector2(30f, 24f);
+        guideText.rectTransform.offsetMax = new Vector2(-30f, -24f);
     }
 
     private void WirePauseButtons()
@@ -465,29 +515,173 @@ public sealed class PauseMenuController : MonoBehaviour
         return text;
     }
 
+    private void SetBackgroundBlur(bool enabled)
+    {
+        EnsureBackgroundBlurVolume();
+        if (backgroundBlurVolume != null)
+        {
+            backgroundBlurVolume.weight = enabled ? 1f : 0f;
+        }
+
+        SetMainCameraPostProcessing(enabled);
+    }
+
+    private void EnsureBackgroundBlurVolume()
+    {
+        if (backgroundBlurVolume != null)
+        {
+            return;
+        }
+
+        var volumeObject = GameObject.Find(BackgroundBlurVolumeName);
+        if (volumeObject == null)
+        {
+            volumeObject = new GameObject(BackgroundBlurVolumeName);
+        }
+
+        backgroundBlurVolume = volumeObject.GetComponent<Volume>();
+        if (backgroundBlurVolume == null)
+        {
+            backgroundBlurVolume = volumeObject.AddComponent<Volume>();
+        }
+
+        backgroundBlurVolume.isGlobal = true;
+        backgroundBlurVolume.priority = 860f;
+        backgroundBlurVolume.weight = 0f;
+
+        if (backgroundBlurProfile == null)
+        {
+            backgroundBlurProfile = ScriptableObject.CreateInstance<VolumeProfile>();
+            backgroundBlurProfile.name = "Runtime Pause Background Blur";
+            ConfigureDepthOfField(backgroundBlurProfile);
+        }
+
+        backgroundBlurVolume.sharedProfile = backgroundBlurProfile;
+    }
+
+    private static void ConfigureDepthOfField(VolumeProfile profile)
+    {
+        var depthOfFieldType = System.Type.GetType("UnityEngine.Rendering.Universal.DepthOfField, Unity.RenderPipelines.Universal.Runtime");
+        if (profile == null || depthOfFieldType == null)
+        {
+            return;
+        }
+
+        var depthOfField = profile.Add(depthOfFieldType, true);
+        if (depthOfField == null)
+        {
+            return;
+        }
+
+        SetVolumeParameter(depthOfField, "mode", "Gaussian");
+        SetVolumeParameter(depthOfField, "gaussianStart", 0f);
+        SetVolumeParameter(depthOfField, "gaussianEnd", 7f);
+        SetVolumeParameter(depthOfField, "gaussianMaxRadius", 1f);
+        SetVolumeParameter(depthOfField, "highQualitySampling", true);
+    }
+
+    private static void SetVolumeParameter(VolumeComponent component, string fieldName, object value)
+    {
+        var field = component.GetType().GetField(fieldName);
+        if (field == null)
+        {
+            return;
+        }
+
+        var parameter = field.GetValue(component);
+        if (parameter == null)
+        {
+            return;
+        }
+
+        var parameterType = parameter.GetType();
+        var overrideStateField = parameterType.GetField("overrideState");
+        if (overrideStateField != null)
+        {
+            overrideStateField.SetValue(parameter, true);
+        }
+        else
+        {
+            var overrideStateProperty = parameterType.GetProperty("overrideState");
+            if (overrideStateProperty != null && overrideStateProperty.CanWrite)
+            {
+                overrideStateProperty.SetValue(parameter, true, null);
+            }
+        }
+
+        var valueField = parameterType.GetField("value");
+        var valueProperty = parameterType.GetProperty("value");
+        var valueType = valueField != null ? valueField.FieldType : valueProperty != null ? valueProperty.PropertyType : null;
+        if (valueType == null)
+        {
+            return;
+        }
+
+        if (value is string enumName && valueType.IsEnum)
+        {
+            value = System.Enum.Parse(valueType, enumName);
+        }
+
+        if (valueField != null)
+        {
+            valueField.SetValue(parameter, value);
+            return;
+        }
+
+        if (valueProperty != null && valueProperty.CanWrite)
+        {
+            valueProperty.SetValue(parameter, value, null);
+        }
+    }
+
+    private void SetMainCameraPostProcessing(bool enabled)
+    {
+        var mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        var additionalDataType = System.Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
+        if (additionalDataType == null)
+        {
+            return;
+        }
+
+        mainCameraAdditionalData = mainCamera.GetComponent(additionalDataType);
+        if (mainCameraAdditionalData == null)
+        {
+            return;
+        }
+
+        var renderPostProcessingProperty = additionalDataType.GetProperty("renderPostProcessing");
+        if (renderPostProcessingProperty == null || !renderPostProcessingProperty.CanRead || !renderPostProcessingProperty.CanWrite)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            if (!hasPostProcessingSnapshot)
+            {
+                previousPostProcessingEnabled = (bool)renderPostProcessingProperty.GetValue(mainCameraAdditionalData, null);
+                hasPostProcessingSnapshot = true;
+            }
+
+            renderPostProcessingProperty.SetValue(mainCameraAdditionalData, true, null);
+            return;
+        }
+
+        if (hasPostProcessingSnapshot)
+        {
+            renderPostProcessingProperty.SetValue(mainCameraAdditionalData, previousPostProcessingEnabled, null);
+            hasPostProcessingSnapshot = false;
+        }
+    }
+
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Pause menu font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

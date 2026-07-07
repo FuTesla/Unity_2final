@@ -77,11 +77,11 @@ public static class MedievalAnimationSetup
         var hit = FindClip(importedClips, "CharacterArmature|HitRecieve", "HitRecieve", "HitReceive", "Hit");
         var hit2 = FindClip(importedClips, "CharacterArmature|HitRecieve_2", "HitRecieve_2", "HitReceive_2", "Hit_2");
         var death = FindClip(importedClips, "CharacterArmature|Death", "Death", "Die", "Dead");
-        var wave = FindClip(importedClips, "CharacterArmature|Wave", "Wave", "Interact");
+        var wave = FindClip(importedClips, "CharacterArmature|Interact", "Interact", "CharacterArmature|Wave", "Wave");
 
         if (idle == null || walk == null || run == null || swordSlash == null || punchRight == null || punchLeft == null || kickRight == null || hit == null || hit2 == null || death == null || wave == null)
         {
-            Debug.LogError($"Could not find Idle/Walk/Run/Sword Slash/Punch Right/Punch Left/Kick Right/Hit/Hit 2/Death/Wave clips in {AnimationsPath}.");
+            Debug.LogError($"Could not find Idle/Walk/Run/Sword Slash/Punch Right/Punch Left/Kick Right/Hit/Hit 2/Death/Interact clips in {AnimationsPath}.");
             return;
         }
 
@@ -167,20 +167,20 @@ public static class MedievalAnimationSetup
         exitHit2.exitTime = 0.9f;
         exitHit2.duration = 0.08f;
 
-        var waveState = stateMachine.AddState("Wave");
-        waveState.motion = wave;
-        waveState.writeDefaultValues = true;
+        var interactState = stateMachine.AddState("Interact");
+        interactState.motion = wave;
+        interactState.writeDefaultValues = true;
 
-        var enterWave = stateMachine.AddAnyStateTransition(waveState);
-        enterWave.hasExitTime = false;
-        enterWave.duration = 0.06f;
-        enterWave.canTransitionToSelf = false;
-        enterWave.AddCondition(AnimatorConditionMode.If, 0f, "Interact");
+        var enterInteract = stateMachine.AddAnyStateTransition(interactState);
+        enterInteract.hasExitTime = false;
+        enterInteract.duration = 0.06f;
+        enterInteract.canTransitionToSelf = false;
+        enterInteract.AddCondition(AnimatorConditionMode.If, 0f, "Interact");
 
-        var exitWave = waveState.AddTransition(locomotion);
-        exitWave.hasExitTime = true;
-        exitWave.exitTime = 0.9f;
-        exitWave.duration = 0.1f;
+        var exitInteract = interactState.AddTransition(locomotion);
+        exitInteract.hasExitTime = true;
+        exitInteract.exitTime = 0.9f;
+        exitInteract.duration = 0.1f;
 
         var deathState = stateMachine.AddState("Death");
         deathState.motion = death;
@@ -198,7 +198,7 @@ public static class MedievalAnimationSetup
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', PunchRight='{punchRight.name}', PunchLeft='{punchLeft.name}', KickRight='{kickRight.name}', Hit='{hit.name}', Hit2='{hit2.name}', Death='{death.name}', Wave='{wave.name}'.");
+        Debug.Log($"Created {ControllerPath} using FBX clips Idle='{idle.name}', Walk='{walk.name}', Run='{run.name}', Attack='{swordSlash.name}', PunchRight='{punchRight.name}', PunchLeft='{punchLeft.name}', KickRight='{kickRight.name}', Hit='{hit.name}', Hit2='{hit2.name}', Death='{death.name}', Interact='{wave.name}'.");
     }
 
     private static AnimatorState AddOneShotState(
@@ -323,7 +323,7 @@ public static class MedievalAnimationSetup
             && ControllerHasState(controller, "Hit")
             && ControllerHasState(controller, "Hit 2")
             && ControllerHasState(controller, "Death")
-            && ControllerHasState(controller, "Wave");
+            && ControllerHasState(controller, "Interact");
     }
 
     private static bool ControllerUsesSourceClips(AnimatorController controller)
