@@ -2,7 +2,11 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
+using System.Collections;
 using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public sealed class PlayerInventoryUI : MonoBehaviour
 {
@@ -13,11 +17,36 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     private static bool isBuildingCharacterPreview;
     private static Font readableFont;
     private static Sprite roundedRectSprite;
+    private static readonly Dictionary<string, Sprite> editorIconSpriteCache = new Dictionary<string, Sprite>();
     private const string BackpackItemsName = "Runtime Backpack Items";
     private const string EmptyBackpackHintName = "Runtime Backpack Empty Hint";
+    private const string ItemDetailPanelName = "Runtime Item Detail Panel";
+    private const string ItemSummaryPanelName = "Runtime Item Summary Panel";
+    private const string ItemDescriptionPanelName = "Runtime Item Description Panel";
+    private const string ItemReceivedToastCanvasName = "Item Received Toast HUD";
+    private const string ItemReceivedToastTextName = "Item Received Toast Text";
     private const string BackpackItemPreviewCameraName = "Runtime Backpack Item Preview Camera";
     private const string BackpackItemPreviewStageName = "Runtime Backpack Item Preview Stage";
     private const string BackpackItemPreviewLightName = "Runtime Backpack Item Preview Light";
+    public const string TaorantingAlbumItemName = "\u9676\u7136\u4ead\u753b\u96c6\u6b8b\u672c";
+    private const string TaorantingAlbumDescription = "\u9676\u7136\u5e7b\u5883\u91cc\u9762\u7684\u753b\u96c6\u6b8b\u672c\uff0c\u770b\u4e0a\u53bb\u5f88\u65e7\uff0c\u5b57\u8ff9\u4e5f\u4e0d\u6e05\u4e86\uff0c\u4e5f\u8bb8\u6536\u96c6\u5168\u90e8\u4e4b\u540e\u62fc\u51d1\u8d77\u6765\u4f1a\u6709\u5927\u7528\u5904\u2026\u2026";
+    private const string FriedEggItemName = "\u714e\u86cb";
+    private const string FriedEggDescription = "\u5e73\u5e73\u65e0\u5947\u7684\u714e\u86cb\u3001\u4f46\u662f\u5728\u5916\u80fd\u52a9\u4f60\u514d\u4e8e\u9965\u997f\uff1b";
+    private const string FellowSketchItemName = "\u540C\u9053\u8005\u7684\u5199\u751F";
+    private const string UnarmedIconPath = "Assets/Art/2D/Icon_Weapeon/Unarmed.png";
+    private const string SwordIconPath = "Assets/Art/2D/Icon_Weapeon/sword.png";
+    private const string HandgunIconPath = "Assets/Art/2D/Icon_Weapeon/pistol.png";
+    private const string TaorantingAlbumIconPath = "Assets/Art/2D/Icon_Item/Book fragment.png";
+    private const string FriedEggIconPath = "Assets/Art/2D/Icon_Item/fried egg.png";
+    private const string FellowSketchIconPath = "Assets/Art/2D/Icon_Item/painting.png";
+    private const string UnarmedIconResourcePath = "UI/weapon_unarmed";
+    private const string SwordIconResourcePath = "UI/weapon_sword";
+    private const string HandgunIconResourcePath = "UI/weapon_pistol";
+    private const string TaorantingAlbumIconResourcePath = "UI/item_book_fragment";
+    private const string FriedEggIconResourcePath = "UI/item_fried_egg";
+    private const string FellowSketchIconResourcePath = "UI/item_painting";
+    private const int BackpackCardCount = 6;
+    private const int BackpackCardColumns = 3;
 
     public KeyCode toggleKey = KeyCode.Tab;
     public GameObject inventoryRoot;
@@ -40,6 +69,10 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     private Component mainCameraAdditionalData;
     private readonly List<InventoryItemEntry> inventoryItems = new List<InventoryItemEntry>();
     private RectTransform backpackItemsRoot;
+    private RectTransform itemDetailRoot;
+    private RectTransform itemSummaryRoot;
+    private RectTransform itemDescriptionRoot;
+    private InventoryItemEntry selectedInventoryItem;
     private Camera backpackItemPreviewCamera;
     private Transform backpackItemPreviewStage;
     private Light backpackItemPreviewLight;
@@ -49,10 +82,18 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     private bool previousPostProcessingEnabled;
     private bool hasPostProcessingSnapshot;
     private bool isOpen;
+    private Text itemReceivedToastText;
+    private CanvasGroup itemReceivedToastCanvasGroup;
+    private Coroutine itemReceivedToastCoroutine;
 
     public bool IsOpen => isOpen;
 
     public void AddInventoryItem(string itemName, int count, GameObject modelPrefab)
+    {
+        AddInventoryItem(itemName, count, modelPrefab, GetDefaultItemDescription(itemName));
+    }
+
+    public void AddInventoryItem(string itemName, int count, GameObject modelPrefab, string description)
     {
         if (string.IsNullOrWhiteSpace(itemName) || count <= 0)
         {
@@ -70,10 +111,22 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         }
         else
         {
-            inventoryItems.Add(new InventoryItemEntry(itemName, count, modelPrefab));
+            inventoryItems.Add(new InventoryItemEntry(itemName, count, modelPrefab, GetSafeItemDescription(itemName, description)));
         }
 
         EnsureInventoryLayout();
+        ShowItemReceivedToast(itemName, count);
+    }
+
+    public int GetInventoryItemCount(string itemName)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            return 0;
+        }
+
+        var existing = inventoryItems.Find(item => string.Equals(item.Name, itemName, System.StringComparison.Ordinal));
+        return existing != null ? existing.Count : 0;
     }
 
     private void Awake()
@@ -215,7 +268,7 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         characterPreviewInstance.name = "Inventory Character Preview";
         characterPreviewInstance.transform.localPosition = Vector3.zero;
         characterPreviewInstance.transform.localRotation = Quaternion.identity;
-        characterPreviewInstance.transform.localScale = Vector3.one * 0.92f;
+        characterPreviewInstance.transform.localScale = Vector3.one * 0.86f;
         SetLayerRecursively(characterPreviewInstance, PreviewLayer);
         StripPreviewGameplayComponents(characterPreviewInstance);
 
@@ -278,6 +331,7 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         RemoveSampleItems(inventoryRoot.transform);
         EnsureBackgroundBlurVeil();
         CenterCharacterPreview();
+        EnsureItemDetailPanel();
         RefreshBackpackItems();
         EnsureWeaponButtons();
         RefreshWeaponButtonStates();
@@ -300,7 +354,15 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     private static bool IsSampleItemObject(string objectName)
     {
         return objectName.StartsWith("Backpack Column Item", System.StringComparison.OrdinalIgnoreCase)
-            || objectName.StartsWith("Nearby Column Item", System.StringComparison.OrdinalIgnoreCase);
+            || objectName.Equals("Backpack Column", System.StringComparison.OrdinalIgnoreCase)
+            || objectName.StartsWith("Nearby Column Item", System.StringComparison.OrdinalIgnoreCase)
+            || objectName.IndexOf("Backpack Column Title", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Backpack Column Subtitle", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Nearby Column Title", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Nearby Column Subtitle", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Character Preview Top Line", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Character Preview Bottom Line", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || objectName.IndexOf("Inventory Divider", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private void CenterCharacterPreview()
@@ -315,8 +377,8 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         previewRect.anchorMin = new Vector2(0.5f, 0.5f);
         previewRect.anchorMax = new Vector2(0.5f, 0.5f);
         previewRect.pivot = new Vector2(0.5f, 0.5f);
-        previewRect.anchoredPosition = Vector2.zero;
-        previewRect.sizeDelta = new Vector2(430f, 600f);
+        previewRect.anchoredPosition = new Vector2(0f, 28f);
+        previewRect.sizeDelta = new Vector2(560f, 780f);
 
         if (characterPreviewStage != null)
         {
@@ -327,9 +389,9 @@ public sealed class PlayerInventoryUI : MonoBehaviour
 
         if (characterPreviewCamera != null)
         {
-            characterPreviewCamera.transform.localPosition = new Vector3(0f, 1.35f, 4.6f);
-            characterPreviewCamera.transform.localRotation = Quaternion.Euler(8f, 180f, 0f);
-            characterPreviewCamera.fieldOfView = 28f;
+            characterPreviewCamera.transform.localPosition = new Vector3(0f, 1.15f, 4.35f);
+            characterPreviewCamera.transform.localRotation = Quaternion.Euler(4f, 180f, 0f);
+            characterPreviewCamera.fieldOfView = 27f;
             characterPreviewCamera.orthographic = false;
         }
     }
@@ -544,12 +606,16 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         controls.anchorMin = new Vector2(0.5f, 0.5f);
         controls.anchorMax = new Vector2(0.5f, 0.5f);
         controls.pivot = new Vector2(0.5f, 0.5f);
-        controls.anchoredPosition = new Vector2(360f, 0f);
-        controls.sizeDelta = new Vector2(190f, 250f);
+        controls.anchoredPosition = new Vector2(620f, 0f);
+        controls.sizeDelta = new Vector2(520f, 780f);
 
-        unarmedButton = FindButton(controls, "Unarmed Button") ?? CreateWeaponButton("Unarmed Button", controls, "\u5f92\u624b", new Vector2(0f, 82f));
-        swordButton = FindButton(controls, "Sword Button") ?? CreateWeaponButton("Sword Button", controls, "\u5251", new Vector2(0f, 0f));
-        handgunButton = FindButton(controls, "Handgun Button") ?? CreateWeaponButton("Handgun Button", controls, "\u624b\u67aa", new Vector2(0f, -82f));
+        unarmedButton = FindButton(controls, "Unarmed Button") ?? CreateWeaponButton("Unarmed Button", controls);
+        swordButton = FindButton(controls, "Sword Button") ?? CreateWeaponButton("Sword Button", controls);
+        handgunButton = FindButton(controls, "Handgun Button") ?? CreateWeaponButton("Handgun Button", controls);
+
+        ConfigureWeaponButton(unarmedButton, "\u5f92\u624b", UnarmedIconPath, new Vector2(0f, 250f));
+        ConfigureWeaponButton(swordButton, "\u5251", SwordIconPath, new Vector2(0f, 0f));
+        ConfigureWeaponButton(handgunButton, "\u624b\u67aa", HandgunIconPath, new Vector2(0f, -250f));
 
         unarmedButton.onClick.RemoveAllListeners();
         swordButton.onClick.RemoveAllListeners();
@@ -583,26 +649,73 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         return null;
     }
 
-    private Button CreateWeaponButton(string objectName, Transform parent, string label, Vector2 position)
+    private Button CreateWeaponButton(string objectName, Transform parent)
     {
-        var image = CreateImage(objectName, parent, new Color(0.12f, 0.32f, 0.54f, 0.96f));
+        var image = CreateImage(objectName, parent, new Color(0.24f, 0.26f, 0.28f, 0.96f));
         image.sprite = GetRoundedRectSprite();
         image.type = Image.Type.Sliced;
         image.raycastTarget = true;
 
-        var rect = image.rectTransform;
+        var button = image.gameObject.AddComponent<Button>();
+        button.colors = GetButtonColors(false);
+        return button;
+    }
+
+    private void ConfigureWeaponButton(Button button, string label, string iconAssetPath, Vector2 position)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        var image = button.GetComponent<Image>();
+        if (image != null)
+        {
+            image.sprite = GetRoundedRectSprite();
+            image.type = Image.Type.Sliced;
+            image.raycastTarget = true;
+        }
+
+        var rect = button.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(170f, 58f);
+        rect.sizeDelta = new Vector2(380f, 218f);
 
-        var button = image.gameObject.AddComponent<Button>();
-        button.colors = GetButtonColors(false);
+        for (var i = rect.childCount - 1; i >= 0; i--)
+        {
+            Destroy(rect.GetChild(i).gameObject);
+        }
 
-        var text = CreateText("Label", rect, label, 24, FontStyle.Bold, Color.white);
-        Stretch(text.rectTransform);
-        return button;
+        var previewFrame = CreateImage("Preview Frame", rect, Color.black);
+        previewFrame.sprite = GetRoundedRectSprite();
+        previewFrame.type = Image.Type.Sliced;
+        previewFrame.raycastTarget = false;
+        previewFrame.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.pivot = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.anchoredPosition = new Vector2(0f, -18f);
+        previewFrame.rectTransform.sizeDelta = new Vector2(320f, 132f);
+
+        var iconSprite = LoadIconSprite(iconAssetPath);
+        if (iconSprite != null)
+        {
+            var iconImage = CreateImage("Icon", previewFrame.rectTransform, Color.white);
+            iconImage.sprite = iconSprite;
+            iconImage.type = Image.Type.Simple;
+            iconImage.preserveAspect = true;
+            iconImage.raycastTarget = false;
+            Stretch(iconImage.rectTransform);
+            iconImage.rectTransform.offsetMin = new Vector2(12f, 10f);
+            iconImage.rectTransform.offsetMax = new Vector2(-12f, -10f);
+        }
+        var text = CreateText("Label", rect, label, 30, FontStyle.Bold, Color.white);
+        text.rectTransform.anchorMin = new Vector2(0f, 0f);
+        text.rectTransform.anchorMax = new Vector2(1f, 0f);
+        text.rectTransform.pivot = new Vector2(0.5f, 0f);
+        text.rectTransform.anchoredPosition = new Vector2(0f, 18f);
+        text.rectTransform.sizeDelta = new Vector2(-48f, 44f);
     }
 
     private void SelectUnarmed()
@@ -643,6 +756,187 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         SetButtonSelected(handgunButton, weaponType == TopDownCharacterMotor.WeaponType.Handgun);
     }
 
+    private void EnsureItemDetailPanel()
+    {
+        if (inventoryRoot == null)
+        {
+            return;
+        }
+
+        var parent = FindDeepChild(inventoryRoot.transform, "Nearby Column");
+        if (parent == null)
+        {
+            parent = FindDeepChild(inventoryRoot.transform, "Item Detail Column");
+        }
+
+        if (parent == null)
+        {
+            var detailColumnObject = new GameObject("Item Detail Column", typeof(RectTransform));
+            detailColumnObject.transform.SetParent(inventoryRoot.transform, false);
+            parent = detailColumnObject.GetComponent<RectTransform>();
+        }
+
+        if (parent is RectTransform detailColumn)
+        {
+            if (detailColumn.transform != inventoryRoot.transform)
+            {
+                detailColumn.SetParent(inventoryRoot.transform, false);
+            }
+
+            detailColumn.anchorMin = new Vector2(0.5f, 0.5f);
+            detailColumn.anchorMax = new Vector2(0.5f, 0.5f);
+            detailColumn.pivot = new Vector2(0.5f, 0.5f);
+            detailColumn.anchoredPosition = new Vector2(-620f, 0f);
+            detailColumn.sizeDelta = new Vector2(540f, 780f);
+        }
+
+        var existingPanel = FindDeepChild(parent, ItemDetailPanelName);
+        itemDetailRoot = existingPanel != null ? existingPanel.GetComponent<RectTransform>() : null;
+
+        for (var i = parent.childCount - 1; i >= 0; i--)
+        {
+            var child = parent.GetChild(i);
+            if (itemDetailRoot == null || child != itemDetailRoot)
+            {
+                Destroy(child.gameObject);
+            }
+        }
+
+        if (itemDetailRoot != null)
+        {
+            RefreshItemDetailPanel();
+            return;
+        }
+
+        var panelImage = CreateImage(ItemDetailPanelName, parent, new Color(0.018f, 0.026f, 0.032f, 0.84f));
+        panelImage.sprite = GetRoundedRectSprite();
+        panelImage.type = Image.Type.Sliced;
+        panelImage.raycastTarget = false;
+        itemDetailRoot = panelImage.rectTransform;
+        itemDetailRoot.anchorMin = new Vector2(0f, 0f);
+        itemDetailRoot.anchorMax = new Vector2(1f, 1f);
+        itemDetailRoot.offsetMin = new Vector2(8f, 8f);
+        itemDetailRoot.offsetMax = new Vector2(-8f, -8f);
+
+        RefreshItemDetailPanel();
+    }
+
+    private void SelectInventoryItem(InventoryItemEntry item)
+    {
+        selectedInventoryItem = item;
+        RefreshItemDetailPanel();
+    }
+
+    private void RefreshItemDetailPanel()
+    {
+        if (itemDetailRoot == null)
+        {
+            return;
+        }
+
+        EnsureItemDetailSubpanels();
+
+        var hasSelection = selectedInventoryItem != null;
+        var name = hasSelection ? selectedInventoryItem.Name : "\u672a\u9009\u62e9\u9053\u5177";
+        var count = hasSelection ? $"x{selectedInventoryItem.Count}" : "--";
+        var description = hasSelection
+            ? selectedInventoryItem.Description
+            : "\u9f20\u6807\u5de6\u952e\u5355\u51fb\u4e2d\u95f4\u80cc\u5305\u5361\u7247\u540e\uff0c\u8fd9\u91cc\u663e\u793a\u9053\u5177\u4fe1\u606f\u3002";
+
+        ClearChildren(itemSummaryRoot);
+        var previewFrame = CreateImage("Preview Frame", itemSummaryRoot, Color.black);
+        previewFrame.sprite = GetRoundedRectSprite();
+        previewFrame.type = Image.Type.Sliced;
+        previewFrame.raycastTarget = false;
+        previewFrame.rectTransform.anchorMin = new Vector2(0f, 0.5f);
+        previewFrame.rectTransform.anchorMax = new Vector2(0f, 0.5f);
+        previewFrame.rectTransform.pivot = new Vector2(0f, 0.5f);
+        previewFrame.rectTransform.anchoredPosition = new Vector2(18f, 0f);
+        previewFrame.rectTransform.sizeDelta = new Vector2(184f, 142f);
+
+        if (hasSelection)
+        {
+            var preview = CreateItemPreview(selectedInventoryItem, previewFrame.rectTransform);
+            Stretch(preview.rectTransform);
+            preview.rectTransform.offsetMin = new Vector2(14f, 10f);
+            preview.rectTransform.offsetMax = new Vector2(-14f, -10f);
+        }
+        var nameText = CreateText("Name", itemSummaryRoot, name, 28, FontStyle.Bold, hasSelection ? Color.white : new Color(0.66f, 0.72f, 0.78f, 1f));
+        nameText.alignment = TextAnchor.MiddleLeft;
+        nameText.rectTransform.anchorMin = new Vector2(0f, 1f);
+        nameText.rectTransform.anchorMax = new Vector2(1f, 1f);
+        nameText.rectTransform.pivot = new Vector2(0f, 1f);
+        nameText.rectTransform.anchoredPosition = new Vector2(224f, -34f);
+        nameText.rectTransform.sizeDelta = new Vector2(-246f, 68f);
+        nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        nameText.verticalOverflow = VerticalWrapMode.Truncate;
+
+        var countText = CreateText("Count", itemSummaryRoot, "\u6301\u6709\u6570\u91cf  " + count, 24, FontStyle.Bold, new Color(1f, 0.76f, 0.36f, 1f));
+        countText.alignment = TextAnchor.MiddleLeft;
+        countText.rectTransform.anchorMin = new Vector2(0f, 1f);
+        countText.rectTransform.anchorMax = new Vector2(1f, 1f);
+        countText.rectTransform.pivot = new Vector2(0f, 1f);
+        countText.rectTransform.anchoredPosition = new Vector2(224f, -126f);
+        countText.rectTransform.sizeDelta = new Vector2(-246f, 38f);
+
+        ClearChildren(itemDescriptionRoot);
+        var descriptionText = CreateText("Description", itemDescriptionRoot, description, 24, FontStyle.Normal, new Color(0.72f, 0.79f, 0.84f, 1f));
+        descriptionText.alignment = TextAnchor.UpperLeft;
+        Stretch(descriptionText.rectTransform);
+        descriptionText.rectTransform.offsetMin = new Vector2(20f, 16f);
+        descriptionText.rectTransform.offsetMax = new Vector2(-20f, -16f);
+        descriptionText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        descriptionText.verticalOverflow = VerticalWrapMode.Truncate;
+    }
+
+    private void EnsureItemDetailSubpanels()
+    {
+        if (itemDetailRoot == null)
+        {
+            return;
+        }
+
+        itemSummaryRoot = EnsurePanelRoot(ItemSummaryPanelName, itemDetailRoot);
+        itemSummaryRoot.anchorMin = new Vector2(0f, 1f);
+        itemSummaryRoot.anchorMax = new Vector2(1f, 1f);
+        itemSummaryRoot.pivot = new Vector2(0.5f, 1f);
+        itemSummaryRoot.anchoredPosition = new Vector2(0f, -16f);
+        itemSummaryRoot.sizeDelta = new Vector2(-24f, 190f);
+
+        itemDescriptionRoot = EnsurePanelRoot(ItemDescriptionPanelName, itemDetailRoot);
+        itemDescriptionRoot.anchorMin = new Vector2(0f, 0f);
+        itemDescriptionRoot.anchorMax = new Vector2(1f, 0f);
+        itemDescriptionRoot.pivot = new Vector2(0.5f, 0f);
+        itemDescriptionRoot.anchoredPosition = new Vector2(0f, 16f);
+        itemDescriptionRoot.sizeDelta = new Vector2(-24f, 176f);
+    }
+
+    private static RectTransform EnsurePanelRoot(string objectName, Transform parent)
+    {
+        var existing = FindDeepChild(parent, objectName);
+        if (existing != null)
+        {
+            return existing.GetComponent<RectTransform>();
+        }
+
+        var obj = new GameObject(objectName, typeof(RectTransform));
+        obj.transform.SetParent(parent, false);
+        return obj.GetComponent<RectTransform>();
+    }
+
+    private static void ClearChildren(Transform parent)
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        for (var i = parent.childCount - 1; i >= 0; i--)
+        {
+            Destroy(parent.GetChild(i).gameObject);
+        }
+    }
+
     private void RefreshBackpackItems()
     {
         if (inventoryRoot == null)
@@ -661,17 +955,19 @@ public sealed class PlayerInventoryUI : MonoBehaviour
             DestroyBackpackItemRow(backpackItemsRoot.GetChild(i).gameObject);
         }
 
-        if (inventoryItems.Count == 0)
-        {
-            CreateEmptyBackpackHint();
-            return;
-        }
-
         EnsureBackpackItemPreviewRig();
 
-        for (var i = 0; i < inventoryItems.Count; i++)
+        if (selectedInventoryItem != null && !inventoryItems.Contains(selectedInventoryItem))
         {
-            CreateBackpackItemRow(inventoryItems[i], i);
+            selectedInventoryItem = null;
+        }
+
+        RefreshItemDetailPanel();
+
+        for (var i = 0; i < BackpackCardCount; i++)
+        {
+            var item = i < inventoryItems.Count ? inventoryItems[i] : null;
+            CreateBackpackItemCard(item, i);
         }
     }
 
@@ -696,127 +992,106 @@ public sealed class PlayerInventoryUI : MonoBehaviour
 
     private void EnsureBackpackItemsRoot()
     {
-        if (backpackItemsRoot != null)
+        if (itemDetailRoot == null)
+        {
+            EnsureItemDetailPanel();
+        }
+
+        if (itemDetailRoot == null)
         {
             return;
         }
 
-        var parent = FindDeepChild(inventoryRoot.transform, "Backpack Column");
-        if (parent == null)
+        if (backpackItemsRoot == null)
         {
-            parent = inventoryRoot.transform;
+            var existing = FindDeepChild(inventoryRoot.transform, BackpackItemsName);
+            if (existing != null)
+            {
+                backpackItemsRoot = existing.GetComponent<RectTransform>();
+            }
         }
 
-        var existing = FindDeepChild(parent, BackpackItemsName);
-        if (existing != null)
+        if (backpackItemsRoot == null)
         {
-            backpackItemsRoot = existing.GetComponent<RectTransform>();
-            return;
+            var rootObject = new GameObject(BackpackItemsName, typeof(RectTransform));
+            rootObject.transform.SetParent(itemDetailRoot, false);
+            backpackItemsRoot = rootObject.GetComponent<RectTransform>();
+        }
+        else if (backpackItemsRoot.transform.parent != itemDetailRoot)
+        {
+            backpackItemsRoot.SetParent(itemDetailRoot, false);
         }
 
-        var rootObject = new GameObject(BackpackItemsName, typeof(RectTransform));
-        rootObject.transform.SetParent(parent, false);
-        backpackItemsRoot = rootObject.GetComponent<RectTransform>();
-        backpackItemsRoot.anchorMin = new Vector2(0f, 1f);
-        backpackItemsRoot.anchorMax = new Vector2(1f, 1f);
+        backpackItemsRoot.anchorMin = new Vector2(0.5f, 1f);
+        backpackItemsRoot.anchorMax = new Vector2(0.5f, 1f);
         backpackItemsRoot.pivot = new Vector2(0.5f, 1f);
-        backpackItemsRoot.anchoredPosition = new Vector2(0f, -74f);
-        backpackItemsRoot.sizeDelta = new Vector2(0f, 430f);
+        backpackItemsRoot.anchoredPosition = new Vector2(0f, -230f);
+        backpackItemsRoot.sizeDelta = new Vector2(492f, 292f);
     }
 
-    private void CreateEmptyBackpackHint()
+    private void CreateBackpackItemCard(InventoryItemEntry item, int index)
     {
-        var hintImage = CreateImage(EmptyBackpackHintName, backpackItemsRoot, new Color(0.02f, 0.028f, 0.034f, 0.62f));
-        hintImage.sprite = GetRoundedRectSprite();
-        hintImage.type = Image.Type.Sliced;
-        hintImage.raycastTarget = false;
+        var row = index / BackpackCardColumns;
+        var column = index % BackpackCardColumns;
+        var isFilled = item != null;
 
-        var rect = hintImage.rectTransform;
-        rect.anchorMin = new Vector2(0.5f, 1f);
-        rect.anchorMax = new Vector2(0.5f, 1f);
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.anchoredPosition = new Vector2(0f, 0f);
-        rect.sizeDelta = new Vector2(370f, 96f);
-
-        var title = CreateText("Title", rect, "\u80cc\u5305\u6682\u65e0\u7269\u54c1", 22, FontStyle.Bold, Color.white);
-        title.alignment = TextAnchor.MiddleCenter;
-        title.rectTransform.anchorMin = Vector2.zero;
-        title.rectTransform.anchorMax = Vector2.one;
-        title.rectTransform.offsetMin = new Vector2(16f, 22f);
-        title.rectTransform.offsetMax = new Vector2(-16f, -14f);
-
-        var subtitle = CreateText("Subtitle", rect, "\u63a2\u7d22\u573a\u666f\u540e\u4f1a\u5728\u8fd9\u91cc\u663e\u793a\u6536\u96c6\u7269", 15, FontStyle.Normal, new Color(0.72f, 0.78f, 0.82f, 1f));
-        subtitle.alignment = TextAnchor.MiddleCenter;
-        subtitle.rectTransform.anchorMin = Vector2.zero;
-        subtitle.rectTransform.anchorMax = Vector2.one;
-        subtitle.rectTransform.offsetMin = new Vector2(16f, 6f);
-        subtitle.rectTransform.offsetMax = new Vector2(-16f, -44f);
-    }
-
-    private void CreateBackpackItemRow(InventoryItemEntry item, int index)
-    {
-        var rowImage = CreateImage($"Backpack Item {index + 1:00}", backpackItemsRoot, new Color(0.025f, 0.034f, 0.042f, 0.92f));
+        var rowImage = CreateImage($"Backpack Card {index + 1:00}", backpackItemsRoot, isFilled ? new Color(0.24f, 0.26f, 0.28f, 0.94f) : new Color(0.18f, 0.19f, 0.2f, 0.58f));
         rowImage.sprite = GetRoundedRectSprite();
         rowImage.type = Image.Type.Sliced;
-        rowImage.raycastTarget = false;
+        rowImage.raycastTarget = isFilled;
 
-        var row = rowImage.rectTransform;
-        row.anchorMin = new Vector2(0.5f, 1f);
-        row.anchorMax = new Vector2(0.5f, 1f);
-        row.pivot = new Vector2(0.5f, 1f);
-        row.anchoredPosition = new Vector2(0f, -index * 104f);
-        row.sizeDelta = new Vector2(386f, 92f);
+        var card = rowImage.rectTransform;
+        card.anchorMin = new Vector2(0f, 1f);
+        card.anchorMax = new Vector2(0f, 1f);
+        card.pivot = new Vector2(0f, 1f);
+        card.anchoredPosition = new Vector2(column * 164f, -row * 146f);
+        card.sizeDelta = new Vector2(150f, 132f);
 
-        var previewFrame = CreateImage("Preview Frame", row, new Color(0.08f, 0.11f, 0.13f, 0.92f));
+        if (isFilled)
+        {
+            var button = rowImage.gameObject.AddComponent<Button>();
+            button.colors = GetButtonColors(false);
+            button.onClick.AddListener(() => SelectInventoryItem(item));
+        }
+
+        var previewFrame = CreateImage("Preview Frame", card, Color.black);
         previewFrame.sprite = GetRoundedRectSprite();
         previewFrame.type = Image.Type.Sliced;
         previewFrame.raycastTarget = false;
-        previewFrame.rectTransform.anchorMin = new Vector2(0f, 0.5f);
-        previewFrame.rectTransform.anchorMax = new Vector2(0f, 0.5f);
-        previewFrame.rectTransform.pivot = new Vector2(0f, 0.5f);
-        previewFrame.rectTransform.anchoredPosition = new Vector2(12f, 0f);
-        previewFrame.rectTransform.sizeDelta = new Vector2(76f, 76f);
+        previewFrame.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.pivot = new Vector2(0.5f, 1f);
+        previewFrame.rectTransform.anchoredPosition = new Vector2(0f, -10f);
+        previewFrame.rectTransform.sizeDelta = new Vector2(118f, 76f);
 
-        var preview = CreateItemPreview(item, previewFrame.rectTransform);
-        preview.rectTransform.anchorMin = new Vector2(0f, 0.5f);
-        preview.rectTransform.anchorMax = new Vector2(0f, 0.5f);
-        preview.rectTransform.pivot = new Vector2(0f, 0.5f);
-        preview.rectTransform.anchoredPosition = new Vector2(6f, 0f);
-        preview.rectTransform.sizeDelta = new Vector2(64f, 64f);
-
-        var nameText = CreateText("Name", row, item.Name, 21, FontStyle.Bold, Color.white);
-        nameText.alignment = TextAnchor.MiddleLeft;
-        nameText.rectTransform.anchorMin = new Vector2(0f, 0f);
-        nameText.rectTransform.anchorMax = new Vector2(1f, 1f);
-        nameText.rectTransform.offsetMin = new Vector2(104f, 32f);
-        nameText.rectTransform.offsetMax = new Vector2(-82f, -12f);
-        nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
-        nameText.verticalOverflow = VerticalWrapMode.Truncate;
-
-        var typeText = CreateText("Type", row, "\u6536\u96c6\u7269", 15, FontStyle.Normal, new Color(0.66f, 0.74f, 0.8f, 1f));
-        typeText.alignment = TextAnchor.MiddleLeft;
-        typeText.rectTransform.anchorMin = new Vector2(0f, 0f);
-        typeText.rectTransform.anchorMax = new Vector2(1f, 0f);
-        typeText.rectTransform.pivot = new Vector2(0f, 0f);
-        typeText.rectTransform.anchoredPosition = new Vector2(104f, 16f);
-        typeText.rectTransform.sizeDelta = new Vector2(170f, 22f);
-
-        var countBadge = CreateImage("Count Badge", row, new Color(0.78f, 0.46f, 0.12f, 1f));
-        countBadge.sprite = GetRoundedRectSprite();
-        countBadge.type = Image.Type.Sliced;
-        countBadge.raycastTarget = false;
-        countBadge.rectTransform.anchorMin = new Vector2(1f, 0.5f);
-        countBadge.rectTransform.anchorMax = new Vector2(1f, 0.5f);
-        countBadge.rectTransform.pivot = new Vector2(1f, 0.5f);
-        countBadge.rectTransform.anchoredPosition = new Vector2(-16f, 0f);
-        countBadge.rectTransform.sizeDelta = new Vector2(58f, 34f);
-
-        var countText = CreateText("Count", countBadge.rectTransform, $"x{item.Count}", 18, FontStyle.Bold, Color.white);
-        Stretch(countText.rectTransform);
+        if (isFilled)
+        {
+            var preview = CreateItemPreview(item, previewFrame.rectTransform);
+            Stretch(preview.rectTransform);
+        }
+        var countLabel = isFilled ? $"x{item.Count}" : "--";
+        var countText = CreateText("Count", card, countLabel, 22, FontStyle.Bold, isFilled ? Color.white : new Color(0.5f, 0.56f, 0.6f, 1f));
+        countText.alignment = TextAnchor.MiddleCenter;
+        countText.rectTransform.anchorMin = new Vector2(0f, 0f);
+        countText.rectTransform.anchorMax = new Vector2(1f, 0f);
+        countText.rectTransform.pivot = new Vector2(0.5f, 0f);
+        countText.rectTransform.anchoredPosition = new Vector2(0f, 10f);
+        countText.rectTransform.sizeDelta = new Vector2(0f, 32f);
     }
 
-    private RawImage CreateItemPreview(InventoryItemEntry item, Transform parent)
+    private Graphic CreateItemPreview(InventoryItemEntry item, Transform parent)
     {
+        var iconSprite = LoadIconSprite(GetItemIconPath(item.Name));
+        if (iconSprite != null)
+        {
+            var iconImage = CreateImage("Item Icon", parent, Color.white);
+            iconImage.sprite = iconSprite;
+            iconImage.type = Image.Type.Simple;
+            iconImage.preserveAspect = true;
+            iconImage.raycastTarget = false;
+            return iconImage;
+        }
+
         var obj = new GameObject("Model Preview", typeof(RectTransform), typeof(RawImage));
         obj.transform.SetParent(parent, false);
 
@@ -938,18 +1213,18 @@ public sealed class PlayerInventoryUI : MonoBehaviour
     private static ColorBlock GetButtonColors(bool selected)
     {
         var normal = selected
-            ? new Color(0.78f, 0.46f, 0.12f, 1f)
-            : new Color(0.12f, 0.32f, 0.54f, 0.96f);
+            ? new Color(0.42f, 0.44f, 0.46f, 1f)
+            : new Color(0.24f, 0.26f, 0.28f, 0.96f);
 
         var highlighted = selected
-            ? new Color(0.92f, 0.58f, 0.18f, 1f)
-            : new Color(0.18f, 0.44f, 0.72f, 1f);
+            ? new Color(0.5f, 0.52f, 0.54f, 1f)
+            : new Color(0.34f, 0.36f, 0.38f, 1f);
 
         return new ColorBlock
         {
             normalColor = normal,
             highlightedColor = highlighted,
-            pressedColor = new Color(0.08f, 0.22f, 0.42f, 1f),
+            pressedColor = new Color(0.16f, 0.17f, 0.18f, 1f),
             selectedColor = highlighted,
             disabledColor = new Color(0.24f, 0.24f, 0.24f, 0.55f),
             colorMultiplier = 1f,
@@ -1079,29 +1354,206 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         return text;
     }
 
+    private void ShowItemReceivedToast(string itemName, int count)
+    {
+        EnsureItemReceivedToastUi();
+        if (itemReceivedToastText == null || itemReceivedToastCanvasGroup == null)
+        {
+            return;
+        }
+
+        itemReceivedToastText.text = $"{itemName}*{count}";
+        itemReceivedToastCanvasGroup.alpha = 1f;
+        itemReceivedToastCanvasGroup.gameObject.SetActive(true);
+
+        if (itemReceivedToastCoroutine != null)
+        {
+            StopCoroutine(itemReceivedToastCoroutine);
+        }
+
+        itemReceivedToastCoroutine = StartCoroutine(HideItemReceivedToastAfterDelay());
+    }
+
+    private void EnsureItemReceivedToastUi()
+    {
+        if (itemReceivedToastText != null && itemReceivedToastCanvasGroup != null)
+        {
+            return;
+        }
+
+        var canvasObject = GameObject.Find(ItemReceivedToastCanvasName);
+        if (canvasObject == null)
+        {
+            canvasObject = new GameObject(ItemReceivedToastCanvasName, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(CanvasGroup));
+            var canvas = canvasObject.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = 210;
+
+            var scaler = canvasObject.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+        }
+
+        itemReceivedToastCanvasGroup = canvasObject.GetComponent<CanvasGroup>();
+        if (itemReceivedToastCanvasGroup == null)
+        {
+            itemReceivedToastCanvasGroup = canvasObject.AddComponent<CanvasGroup>();
+        }
+
+        itemReceivedToastCanvasGroup.interactable = false;
+        itemReceivedToastCanvasGroup.blocksRaycasts = false;
+
+        var textTransform = FindDeepChild(canvasObject.transform, ItemReceivedToastTextName);
+        if (textTransform != null)
+        {
+            itemReceivedToastText = textTransform.GetComponent<Text>();
+        }
+
+        if (itemReceivedToastText == null)
+        {
+            itemReceivedToastText = CreateText(ItemReceivedToastTextName, canvasObject.transform, string.Empty, 30, FontStyle.Bold, new Color(1f, 0.88f, 0.42f, 1f));
+            itemReceivedToastText.alignment = TextAnchor.MiddleLeft;
+            itemReceivedToastText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            itemReceivedToastText.verticalOverflow = VerticalWrapMode.Overflow;
+
+            var outline = itemReceivedToastText.gameObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0f, 0f, 0f, 0.72f);
+            outline.effectDistance = new Vector2(1.4f, -1.4f);
+        }
+
+        var rect = itemReceivedToastText.rectTransform;
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = new Vector2(72f, 0f);
+        rect.sizeDelta = new Vector2(560f, 72f);
+        itemReceivedToastCanvasGroup.gameObject.SetActive(false);
+    }
+
+    private IEnumerator HideItemReceivedToastAfterDelay()
+    {
+        yield return new WaitForSecondsRealtime(2.2f);
+
+        if (itemReceivedToastCanvasGroup != null)
+        {
+            itemReceivedToastCanvasGroup.alpha = 0f;
+            itemReceivedToastCanvasGroup.gameObject.SetActive(false);
+        }
+
+        itemReceivedToastCoroutine = null;
+    }
+
+    private static Sprite LoadIconSprite(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return null;
+        }
+
+        if (editorIconSpriteCache.TryGetValue(assetPath, out var cachedSprite))
+        {
+            return cachedSprite;
+        }
+
+        Sprite sprite = null;
+#if UNITY_EDITOR
+        sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (sprite == null)
+        {
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+            if (texture != null)
+            {
+                sprite = Sprite.Create(
+                    texture,
+                    new Rect(0f, 0f, texture.width, texture.height),
+                    new Vector2(0.5f, 0.5f),
+                    100f,
+                    0,
+                    SpriteMeshType.FullRect);
+            }
+        }
+
+#endif
+
+        if (sprite == null)
+        {
+            sprite = LoadRuntimeIconSprite(assetPath);
+        }
+
+        editorIconSpriteCache[assetPath] = sprite;
+        return sprite;
+    }
+
+    private static Sprite LoadRuntimeIconSprite(string assetPath)
+    {
+        var resourcePath = GetIconResourcePath(assetPath);
+        if (string.IsNullOrWhiteSpace(resourcePath))
+        {
+            return null;
+        }
+
+        var resourceSprite = Resources.Load<Sprite>(resourcePath);
+        if (resourceSprite != null)
+        {
+            return resourceSprite;
+        }
+
+        var texture = Resources.Load<Texture2D>(resourcePath);
+        return texture != null ? CreateRuntimeSprite(texture) : null;
+    }
+
+    private static string GetIconResourcePath(string assetPath)
+    {
+        if (string.Equals(assetPath, UnarmedIconPath, System.StringComparison.Ordinal))
+        {
+            return UnarmedIconResourcePath;
+        }
+
+        if (string.Equals(assetPath, SwordIconPath, System.StringComparison.Ordinal))
+        {
+            return SwordIconResourcePath;
+        }
+
+        if (string.Equals(assetPath, HandgunIconPath, System.StringComparison.Ordinal))
+        {
+            return HandgunIconResourcePath;
+        }
+
+        if (string.Equals(assetPath, TaorantingAlbumIconPath, System.StringComparison.Ordinal))
+        {
+            return TaorantingAlbumIconResourcePath;
+        }
+
+        if (string.Equals(assetPath, FriedEggIconPath, System.StringComparison.Ordinal))
+        {
+            return FriedEggIconResourcePath;
+        }
+
+        if (string.Equals(assetPath, FellowSketchIconPath, System.StringComparison.Ordinal))
+        {
+            return FellowSketchIconResourcePath;
+        }
+
+        return null;
+    }
+
+    private static Sprite CreateRuntimeSprite(Texture2D texture)
+    {
+        return Sprite.Create(
+            texture,
+            new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            0,
+            SpriteMeshType.FullRect);
+    }
+
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Inventory font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 
@@ -1187,6 +1639,48 @@ public sealed class PlayerInventoryUI : MonoBehaviour
         SetBoolIfExists(animator, parameterName, value);
     }
 
+    private static string GetDefaultItemDescription(string itemName)
+    {
+        if (string.Equals(itemName, TaorantingAlbumItemName, System.StringComparison.Ordinal))
+        {
+            return TaorantingAlbumDescription;
+        }
+
+        if (string.Equals(itemName, FriedEggItemName, System.StringComparison.Ordinal))
+        {
+            return FriedEggDescription;
+        }
+
+        return "\u9053\u5177\u8bf4\u660e\u5360\u4f4d\uff1a\u540e\u7eed\u53ef\u5728\u8fd9\u91cc\u63a5\u5165\u5177\u4f53\u7528\u9014\u548c\u80cc\u666f\u6587\u672c\u3002";
+    }
+
+    private static string GetSafeItemDescription(string itemName, string description)
+    {
+        return string.IsNullOrWhiteSpace(description)
+            ? GetDefaultItemDescription(itemName)
+            : description;
+    }
+
+    private static string GetItemIconPath(string itemName)
+    {
+        if (string.Equals(itemName, TaorantingAlbumItemName, System.StringComparison.Ordinal))
+        {
+            return TaorantingAlbumIconPath;
+        }
+
+        if (string.Equals(itemName, FriedEggItemName, System.StringComparison.Ordinal))
+        {
+            return FriedEggIconPath;
+        }
+
+        if (string.Equals(itemName, FellowSketchItemName, System.StringComparison.Ordinal))
+        {
+            return FellowSketchIconPath;
+        }
+
+        return null;
+    }
+
     private static void SetBoolIfExists(Animator targetAnimator, string parameterName, bool value)
     {
         foreach (var parameter in targetAnimator.parameters)
@@ -1201,15 +1695,17 @@ public sealed class PlayerInventoryUI : MonoBehaviour
 
     private sealed class InventoryItemEntry
     {
-        public InventoryItemEntry(string name, int count, GameObject modelPrefab)
+        public InventoryItemEntry(string name, int count, GameObject modelPrefab, string description)
         {
             Name = name;
             Count = count;
             ModelPrefab = modelPrefab;
+            Description = description;
         }
 
         public string Name { get; }
         public int Count { get; set; }
         public GameObject ModelPrefab { get; set; }
+        public string Description { get; }
     }
 }

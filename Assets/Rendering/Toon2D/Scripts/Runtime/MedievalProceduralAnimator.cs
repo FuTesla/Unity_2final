@@ -3,10 +3,12 @@ using UnityEngine;
 
 public sealed class MedievalProceduralAnimator : MonoBehaviour
 {
+    private const float MinimumRunCycleSpeed = 12.5f;
+
     public TopDownCharacterMotor motor;
     public Animator animatorToDisable;
     public float walkCycleSpeed = 7.5f;
-    public float runCycleSpeed = 11f;
+    public float runCycleSpeed = 12.5f;
     public float armDownAngle = 62f;
     public float armForwardSwing = 0.34f;
     public float armSideRelax = 0.16f;
@@ -26,6 +28,8 @@ public sealed class MedievalProceduralAnimator : MonoBehaviour
 
     private void Awake()
     {
+        runCycleSpeed = Mathf.Max(runCycleSpeed, MinimumRunCycleSpeed);
+
         if (motor == null)
         {
             motor = GetComponent<TopDownCharacterMotor>();

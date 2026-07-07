@@ -1,29 +1,24 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 public sealed class ChestLootInteractable : MonoBehaviour
 {
-    private enum ChestState
-    {
-        Closed,
-        OpenWithLoot,
-        Empty
-    }
+    private const string LevelTwoSceneName = "Lvl_2";
 
     [Header("Interaction")]
     public KeyCode interactKey = KeyCode.F;
     public float interactDistance = 3f;
     public Transform player;
     public TopDownCharacterMotor playerMotor;
-    public Vector3 promptWorldOffset = new Vector3(1.15f, 1f, 0f);
+    public Vector3 promptWorldOffset = new Vector3(0f, 0.08f, 0f);
     public Vector2 promptSize = new Vector2(280f, 54f);
+    public float promptScreenVerticalOffset = 18f;
 
     [Header("Visuals")]
     public GameObject closedChestPrefab;
-    public GameObject openLootChestPrefab;
-    public GameObject emptyChestPrefab;
     public Vector3 modelLocalPosition = Vector3.zero;
     public Vector3 modelLocalEulerAngles = Vector3.zero;
     public Vector3 modelLocalScale = Vector3.one;
@@ -32,6 +27,9 @@ public sealed class ChestLootInteractable : MonoBehaviour
     public string itemName = "\u9676\u7136\u4ead\u753b\u96c6\u6b8b\u672c";
     public int itemCount = 5;
     public GameObject itemModelPrefab;
+    public string bonusItemName = "\u714e\u86cb";
+    public int bonusItemCount = 2;
+    public GameObject bonusItemModelPrefab;
 
     private const string CanvasName = "Chest Loot Prompt HUD";
     private const string PromptName = "Chest Loot Prompt";
@@ -44,20 +42,55 @@ public sealed class ChestLootInteractable : MonoBehaviour
 
     private Camera mainCamera;
     private GameObject closedVisual;
-    private GameObject openLootVisual;
-    private GameObject emptyVisual;
     private GameObject promptRoot;
     private RectTransform promptCanvasRoot;
     private RectTransform promptRect;
     private Text promptLabel;
-    private ChestState state = ChestState.Closed;
+    private bool hasCollected;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void BootstrapSceneChestBinding()
+    {
+        SceneManager.sceneLoaded -= BindLooseLevelTwoChests;
+        SceneManager.sceneLoaded += BindLooseLevelTwoChests;
+    }
+
+    private static void BindLooseLevelTwoChests(Scene scene, LoadSceneMode mode)
+    {
+        if (!string.Equals(scene.name, LevelTwoSceneName, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var transform in FindObjectsOfType<Transform>(true))
+        {
+            if (transform == null
+                || transform.gameObject.scene != scene
+                || !LooksLikeChestObject(transform.name)
+                || transform.GetComponentInParent<ChestLootInteractable>() != null)
+            {
+                continue;
+            }
+
+            transform.gameObject.AddComponent<ChestLootInteractable>();
+        }
+    }
+
+    private static bool LooksLikeChestObject(string objectName)
+    {
+        return !string.IsNullOrWhiteSpace(objectName)
+            && (objectName.IndexOf("Chest_Closed", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || objectName.IndexOf("Loot Chest", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || objectName.IndexOf("\u5B9D\u7BB1", System.StringComparison.OrdinalIgnoreCase) >= 0);
+    }
 
     private void Awake()
     {
         ResolveReferences();
         EnsurePromptUi();
         EnsureVisuals();
-        SetState(ChestState.Closed);
+        RefreshVisualState();
+        RefreshPromptText();
         SetPromptVisible(false);
     }
 
@@ -77,13 +110,7 @@ public sealed class ChestLootInteractable : MonoBehaviour
             return;
         }
 
-        if (state == ChestState.Closed)
-        {
-            SetState(ChestState.OpenWithLoot);
-            return;
-        }
-
-        if (state == ChestState.OpenWithLoot)
+        if (!hasCollected)
         {
             TryCollectLoot();
         }
@@ -136,14 +163,11 @@ public sealed class ChestLootInteractable : MonoBehaviour
         }
 
         inventory.AddInventoryItem(itemName, itemCount, itemModelPrefab);
-        SetState(ChestState.Empty);
-    }
-
-    private void SetState(ChestState nextState)
-    {
-        state = nextState;
+        inventory.AddInventoryItem(bonusItemName, bonusItemCount, bonusItemModelPrefab);
+        hasCollected = true;
         RefreshVisualState();
         RefreshPromptText();
+        UpdatePrompt();
     }
 
     private void EnsureVisuals()
@@ -164,21 +188,9 @@ public sealed class ChestLootInteractable : MonoBehaviour
             closedVisual = CreateVisual(closedChestPrefab, ClosedVisualName);
         }
 
-        openLootVisual = FindVisual(OpenLootVisualName);
-        if (openLootVisual == null)
-        {
-            openLootVisual = CreateVisual(openLootChestPrefab, OpenLootVisualName);
-        }
-
-        emptyVisual = FindVisual(EmptyVisualName);
-        if (emptyVisual == null)
-        {
-            emptyVisual = CreateVisual(emptyChestPrefab, EmptyVisualName);
-        }
-
         ApplyVisualTransform(closedVisual);
-        ApplyVisualTransform(openLootVisual);
-        ApplyVisualTransform(emptyVisual);
+        DisableLegacyVisual(OpenLootVisualName);
+        DisableLegacyVisual(EmptyVisualName);
     }
 
     private GameObject FindVisual(string visualName)
@@ -216,9 +228,18 @@ public sealed class ChestLootInteractable : MonoBehaviour
     private void RefreshVisualState()
     {
         EnsureVisuals();
-        SetVisualActive(closedVisual, state == ChestState.Closed);
-        SetVisualActive(openLootVisual, state == ChestState.OpenWithLoot);
-        SetVisualActive(emptyVisual, state == ChestState.Empty);
+        SetVisualActive(closedVisual, true);
+        DisableLegacyVisual(OpenLootVisualName);
+        DisableLegacyVisual(EmptyVisualName);
+    }
+
+    private void DisableLegacyVisual(string visualName)
+    {
+        var visual = FindVisual(visualName);
+        if (visual != null)
+        {
+            SetVisualActive(visual, false);
+        }
     }
 
     private static void SetVisualActive(GameObject visual, bool active)
@@ -231,7 +252,7 @@ public sealed class ChestLootInteractable : MonoBehaviour
 
     private void UpdatePrompt()
     {
-        var shouldShow = state != ChestState.Empty && IsPlayerInRange();
+        var shouldShow = !hasCollected && IsPlayerInRange();
         SetPromptVisible(shouldShow);
         if (shouldShow)
         {
@@ -247,9 +268,7 @@ public sealed class ChestLootInteractable : MonoBehaviour
             return;
         }
 
-        promptLabel.text = state == ChestState.Closed
-            ? "\u6309\u4e0bF\u6253\u5f00\u5b9d\u7bb1"
-            : $"\u6309\u4e0bF\u62fe\u53d6 {itemName}*{itemCount}";
+        promptLabel.text = "\u6309\u4e0bF\u6253\u5f00\u5b9d\u7bb1";
 
         if (promptLabel.font != null)
         {
@@ -264,20 +283,7 @@ public sealed class ChestLootInteractable : MonoBehaviour
             return;
         }
 
-        var right = transform.right;
-        right.y = 0f;
-        if (right.sqrMagnitude < 0.001f)
-        {
-            right = Vector3.right;
-        }
-        else
-        {
-            right.Normalize();
-        }
-
-        var worldPosition = transform.position + right * promptWorldOffset.x + Vector3.up * promptWorldOffset.y + transform.forward * promptWorldOffset.z;
-        var screenPosition = mainCamera.WorldToScreenPoint(worldPosition);
-        if (screenPosition.z <= 0f)
+        if (!TryGetPromptScreenPosition(out var screenPosition))
         {
             SetPromptVisible(false);
             return;
@@ -287,6 +293,109 @@ public sealed class ChestLootInteractable : MonoBehaviour
         {
             promptRect.anchoredPosition = localPoint;
         }
+    }
+
+    private bool TryGetPromptScreenPosition(out Vector2 screenPosition)
+    {
+        screenPosition = Vector2.zero;
+        if (!TryGetVisualBounds(closedVisual != null ? closedVisual.transform : transform, out var bounds))
+        {
+            var fallback = mainCamera.WorldToScreenPoint(transform.position + promptWorldOffset);
+            if (fallback.z <= 0f)
+            {
+                return false;
+            }
+
+            screenPosition = new Vector2(fallback.x, fallback.y + promptScreenVerticalOffset);
+            return true;
+        }
+
+        var min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+        var max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+        var hasVisibleCorner = false;
+        var center = bounds.center + promptWorldOffset;
+        var extents = bounds.extents;
+
+        for (var x = -1; x <= 1; x += 2)
+        {
+            for (var y = -1; y <= 1; y += 2)
+            {
+                for (var z = -1; z <= 1; z += 2)
+                {
+                    var corner = center + Vector3.Scale(extents, new Vector3(x, y, z));
+                    var projected = mainCamera.WorldToScreenPoint(corner);
+                    if (projected.z <= 0f)
+                    {
+                        continue;
+                    }
+
+                    hasVisibleCorner = true;
+                    min = Vector2.Min(min, projected);
+                    max = Vector2.Max(max, projected);
+                }
+            }
+        }
+
+        if (!hasVisibleCorner)
+        {
+            return false;
+        }
+
+        screenPosition = new Vector2((min.x + max.x) * 0.5f, max.y + promptScreenVerticalOffset);
+        return true;
+    }
+
+    private static bool TryGetVisualBounds(Transform root, out Bounds bounds)
+    {
+        bounds = new Bounds(root != null ? root.position : Vector3.zero, Vector3.zero);
+        if (root == null)
+        {
+            return false;
+        }
+
+        var hasBounds = false;
+        foreach (var renderer in root.GetComponentsInChildren<Renderer>(false))
+        {
+            if (!renderer.enabled || !renderer.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (hasBounds)
+        {
+            return true;
+        }
+
+        foreach (var collider in root.GetComponentsInChildren<Collider>(false))
+        {
+            if (!collider.enabled || !collider.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(collider.bounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     private void EnsurePromptUi()
@@ -311,38 +420,83 @@ public sealed class ChestLootInteractable : MonoBehaviour
 
         promptCanvasRoot = canvasObject.GetComponent<RectTransform>();
         Stretch(promptCanvasRoot);
+        DisableLegacySharedPrompt(canvasObject.transform);
 
-        var existing = canvasObject.transform.Find(PromptName);
+        var instancePromptName = $"{PromptName} {GetInstanceID()}";
+        var existing = canvasObject.transform.Find(instancePromptName);
         if (existing != null)
         {
             promptRoot = existing.gameObject;
-            promptRect = promptRoot.GetComponent<RectTransform>();
-            promptLabel = promptRoot.GetComponentInChildren<Text>(true);
+        }
+        else
+        {
+            promptRoot = new GameObject(instancePromptName, typeof(RectTransform), typeof(Image));
+            promptRoot.transform.SetParent(canvasObject.transform, false);
+        }
+
+        promptRect = promptRoot.GetComponent<RectTransform>();
+        promptLabel = promptRoot.GetComponentInChildren<Text>(true);
+
+        if (promptLabel == null)
+        {
+            var label = new GameObject("Label", typeof(RectTransform), typeof(Text));
+            label.transform.SetParent(promptRoot.transform, false);
+            promptLabel = label.GetComponent<Text>();
+        }
+
+        ConfigurePromptUi();
+    }
+
+    private void ConfigurePromptUi()
+    {
+        if (promptRect == null)
+        {
             return;
         }
 
-        promptRoot = new GameObject(PromptName, typeof(RectTransform), typeof(Image));
-        promptRoot.transform.SetParent(canvasObject.transform, false);
-        promptRect = promptRoot.GetComponent<RectTransform>();
         promptRect.anchorMin = new Vector2(0.5f, 0.5f);
         promptRect.anchorMax = new Vector2(0.5f, 0.5f);
-        promptRect.pivot = new Vector2(0f, 0.5f);
+        promptRect.pivot = new Vector2(0.5f, 0f);
         promptRect.sizeDelta = promptSize;
+        promptRect.localScale = Vector3.one;
 
-        var background = promptRoot.GetComponent<Image>();
-        background.color = new Color(0.04f, 0.05f, 0.05f, 0.86f);
-        background.sprite = GetPromptSprite();
-        background.type = Image.Type.Sliced;
-        background.raycastTarget = false;
+        var background = promptRoot != null ? promptRoot.GetComponent<Image>() : null;
+        if (background != null)
+        {
+            background.color = new Color(0.04f, 0.05f, 0.05f, 0.86f);
+            background.sprite = GetPromptSprite();
+            background.type = Image.Type.Sliced;
+            background.raycastTarget = false;
+        }
 
-        var label = new GameObject("Label", typeof(RectTransform), typeof(Text));
-        label.transform.SetParent(promptRoot.transform, false);
-        var labelRect = label.GetComponent<RectTransform>();
+        ConfigurePromptLabel();
+    }
+
+    private static void DisableLegacySharedPrompt(Transform canvasTransform)
+    {
+        if (canvasTransform == null)
+        {
+            return;
+        }
+
+        var oldPrompt = canvasTransform.Find(PromptName);
+        if (oldPrompt != null)
+        {
+            oldPrompt.gameObject.SetActive(false);
+        }
+    }
+
+    private void ConfigurePromptLabel()
+    {
+        if (promptLabel == null)
+        {
+            return;
+        }
+
+        var labelRect = promptLabel.rectTransform;
         Stretch(labelRect);
         labelRect.offsetMin = new Vector2(16f, 0f);
         labelRect.offsetMax = new Vector2(-16f, 0f);
-
-        promptLabel = label.GetComponent<Text>();
         promptLabel.alignment = TextAnchor.MiddleCenter;
         promptLabel.font = GetReadableFont();
         promptLabel.fontSize = 22;
@@ -364,27 +518,7 @@ public sealed class ChestLootInteractable : MonoBehaviour
 
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Chest prompt font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

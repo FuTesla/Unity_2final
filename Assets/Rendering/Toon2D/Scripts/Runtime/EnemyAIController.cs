@@ -55,6 +55,11 @@ public sealed class EnemyAIController : MonoBehaviour
 
     private void Update()
     {
+        if (health == null)
+        {
+            health = GetComponent<EnemyHealth>();
+        }
+
         if (health != null && health.IsDead)
         {
             return;

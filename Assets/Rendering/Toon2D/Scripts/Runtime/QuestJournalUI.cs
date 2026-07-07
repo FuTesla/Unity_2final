@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -28,6 +29,9 @@ public sealed class QuestJournalUI : MonoBehaviour
     private TopDownCharacterMotor playerMotor;
     private PlayerInventoryUI inventoryUI;
     private bool restoreMotorEnabled;
+    private bool previousCursorVisible;
+    private CursorLockMode previousCursorLockMode;
+    private bool hasCursorSnapshot;
     private int selectedIndex;
     private bool isOpen;
 
@@ -104,6 +108,7 @@ public sealed class QuestJournalUI : MonoBehaviour
                 inventoryUI.SetOpen(false);
             }
 
+            CaptureCursorState();
             restoreMotorEnabled = playerMotor != null && playerMotor.enabled;
             if (playerMotor != null)
             {
@@ -114,9 +119,14 @@ public sealed class QuestJournalUI : MonoBehaviour
             Cursor.lockState = CursorLockMode.None;
             RefreshContent();
         }
-        else if (playerMotor != null)
+        else
         {
-            playerMotor.enabled = restoreMotorEnabled;
+            if (playerMotor != null)
+            {
+                playerMotor.enabled = restoreMotorEnabled;
+            }
+
+            RestoreCursorState();
         }
 
         if (journalRoot != null)
@@ -265,42 +275,62 @@ public sealed class QuestJournalUI : MonoBehaviour
     private QuestEntry[] BuildQuestEntries()
     {
         var currentTitle = string.IsNullOrWhiteSpace(QuestTrackerUI.CurrentQuestText)
-            ? "\u7EE7\u7EED\u5411\u524D\u63A2\u7D22"
+            ? "\u5728\u56ED\u4E2D\u81EA\u7531\u63A2\u7D22"
             : QuestTrackerUI.CurrentQuestText.Split('\n')[0].Trim();
         var currentState = QuestTrackerUI.IsCompleted
             ? "\u5DF2\u5B8C\u6210"
             : QuestTrackerUI.HasActiveQuest ? "\u8FDB\u884C\u4E2D" : "\u672A\u63A5\u53D6";
-        var currentDescription = QuestTrackerUI.IsCompleted
-            ? "\u4F60\u5DF2\u7ECF\u7A7F\u8FC7\u524D\u65B9\u7684\u7EFF\u8272\u76EE\u6807\u533A\u57DF\uFF0C\u5F53\u524D\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002"
-            : "\u4E0E NPC \u5BF9\u8BDD\u540E\u63A5\u53D6\u4EFB\u52A1\uFF0C\u7136\u540E\u7A7F\u8FC7\u524D\u65B9\u7684\u7EFF\u8272\u76EE\u6807\u533A\u57DF\u3002";
+        var currentDescription = GetCurrentQuestDescription(currentTitle);
 
-        return new[]
+        var entries = new List<QuestEntry>
         {
             new QuestEntry
             {
                 Title = currentTitle,
                 State = currentState,
                 Description = currentDescription
-            },
-            new QuestEntry
-            {
-                Title = "\u68C0\u67E5\u6751\u53E3",
-                State = "\u793A\u4F8B",
-                Description = "\u524D\u5F80\u6751\u53E3\u67E5\u770B\u9053\u8DEF\u60C5\u51B5\uFF0C\u786E\u8BA4\u662F\u5426\u6709\u654C\u4EBA\u51FA\u6CA1\u3002"
-            },
-            new QuestEntry
-            {
-                Title = "\u6536\u96C6\u8865\u7ED9",
-                State = "\u793A\u4F8B",
-                Description = "\u5728\u573A\u666F\u4E2D\u5BFB\u627E\u53EF\u7528\u7684\u8865\u7ED9\u7269\u8D44\uFF0C\u4E3A\u63A5\u4E0B\u6765\u7684\u63A2\u7D22\u505A\u51C6\u5907\u3002"
-            },
-            new QuestEntry
-            {
-                Title = "\u8FD4\u56DE NPC \u5904",
-                State = "\u793A\u4F8B",
-                Description = "\u5B8C\u6210\u63A2\u7D22\u540E\u56DE\u5230 NPC \u9644\u8FD1\uFF0C\u83B7\u53D6\u4E0B\u4E00\u6B65\u6307\u793A\u3002"
             }
         };
+
+        if (QuestTrackerUI.HasFamousPavilionsQuest)
+        {
+            entries.Add(new QuestEntry
+            {
+                Title = QuestTrackerUI.FamousPavilionsQuestText,
+                State = GetFamousPavilionsQuestState(),
+                Description = GetFamousPavilionsQuestDescription()
+            });
+        }
+
+        return entries.ToArray();
+    }
+
+    private static string GetFamousPavilionsQuestState()
+    {
+        return QuestTrackerUI.IsFamousPavilionsQuestCompleted
+            ? "\u5DF2\u5B8C\u6210"
+            : $"\u8FDB\u884C\u4E2D {QuestTrackerUI.FamousPavilionsVisitedCount}/3";
+    }
+
+    private static string GetFamousPavilionsQuestDescription()
+    {
+        return QuestTrackerUI.IsFamousPavilionsQuestCompleted
+            ? "\u4F60\u5DF2\u7ECF\u63A2\u5BFB\u5B8C\u9676\u7136\u4EAD\u3001\u5439\u53F0\u548C\u7231\u665A\u4EAD\uFF0C\u83B7\u5F97\u4E86\u714E\u86CB x1\u3002"
+            : "\u63A2\u5BFB\u9676\u7136\u4EAD\u3001\u5439\u53F0\u548C\u7231\u665A\u4EAD\u3002\u8FDB\u5165\u4E09\u5904\u89E6\u53D1\u6846\u5E76\u8BFB\u5B8C\u4ECB\u7ECD\u540E\u5B8C\u6210\u4EFB\u52A1\uFF0C\u5956\u52B1\u714E\u86CB x1\u3002";
+    }
+
+    private static string GetCurrentQuestDescription(string currentTitle)
+    {
+        if (string.Equals(currentTitle, QuestTrackerUI.LevelTwoFragmentQuestText, System.StringComparison.Ordinal))
+        {
+            return QuestTrackerUI.IsCompleted
+                ? "\u4F60\u5DF2\u7ECF\u6536\u96C6\u523025\u4E2A\u6B8B\u9875\uFF0C\u53EF\u4EE5\u5728\u4E66\u6A21\u578B\u5904\u7EE7\u7EED\u63A2\u7D22\u3002"
+                : "\u6253\u5F00\u5173\u53612\u4E2D\u76845\u4E2A\u5B9D\u7BB1\uFF0C\u6BCF\u4E2A\u5B9D\u7BB1\u53EF\u83B7\u5F975\u4E2A\u6B8B\u9875\uFF0C\u6536\u96C6\u523025\u4E2A\u6B8B\u9875\u540E\u56DE\u5230\u4E66\u6A21\u578B\u5904\u3002";
+        }
+
+        return QuestTrackerUI.IsCompleted
+            ? "\u4F60\u5DF2\u7ECF\u4F20\u9001\u5230\u7B2C\u4E8C\u5173\u5361\uFF0C\u5F53\u524D\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002"
+            : "\u4E0E NPC \u5BF9\u8BDD\u540E\u63A5\u53D6\u4EFB\u52A1\uFF0C\u5728\u9676\u7136\u4EAD\u56ED\u4E2D\u81EA\u7531\u63A2\u7D22\uFF0C\u627E\u5230\u901A\u5F80\u7B2C\u4E8C\u5173\u7684\u4F20\u9001\u70B9\u3002";
     }
 
     private void CreateQuestListButton(int index, QuestEntry entry)
@@ -394,6 +424,30 @@ public sealed class QuestJournalUI : MonoBehaviour
         return text;
     }
 
+    private void CaptureCursorState()
+    {
+        if (hasCursorSnapshot)
+        {
+            return;
+        }
+
+        previousCursorVisible = Cursor.visible;
+        previousCursorLockMode = Cursor.lockState;
+        hasCursorSnapshot = true;
+    }
+
+    private void RestoreCursorState()
+    {
+        if (!hasCursorSnapshot)
+        {
+            return;
+        }
+
+        Cursor.visible = previousCursorVisible;
+        Cursor.lockState = previousCursorLockMode;
+        hasCursorSnapshot = false;
+    }
+
     private static void ClearChildren(Transform root)
     {
         if (root == null)
@@ -409,27 +463,7 @@ public sealed class QuestJournalUI : MonoBehaviour
 
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Quest journal font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -13,6 +14,7 @@ public sealed class OpeningMenuController : MonoBehaviour
 
     public string playerNameContains = "Medieval";
     public bool showOnStart = true;
+    public string startSceneName = "Lvl_1";
     public Vector2 referenceResolution = new Vector2(1920f, 1080f);
 
     private static Font readableFont;
@@ -22,7 +24,6 @@ public sealed class OpeningMenuController : MonoBehaviour
     private Camera openingCamera;
     private RenderTexture backgroundTexture;
     private GameObject menuRoot;
-    private bool previousOpeningCameraHdr;
     private TopDownCharacterMotor playerMotor;
     private PlayerInventoryUI inventoryUI;
     private PauseMenuController pauseMenu;
@@ -40,7 +41,6 @@ public sealed class OpeningMenuController : MonoBehaviour
     private void Awake()
     {
         openingCamera = GetComponent<Camera>();
-        previousOpeningCameraHdr = openingCamera.allowHDR;
         openingAudioListener = GetComponent<AudioListener>();
         if (openingAudioListener != null)
         {
@@ -49,7 +49,7 @@ public sealed class OpeningMenuController : MonoBehaviour
 
         BuildMenu();
 
-        if (showOnStart && !ConsumeSkipNextOpeningMenu())
+        if (showOnStart && !ShouldBypassOpeningMenu())
         {
             ShowMenu();
         }
@@ -108,13 +108,31 @@ public sealed class OpeningMenuController : MonoBehaviour
 
     public void StartGame()
     {
-        HideMenu(true);
+        if (string.IsNullOrWhiteSpace(startSceneName))
+        {
+            HideMenu(true);
+            return;
+        }
+
+        SceneDirectControlRouter.RequestDirectControl(startSceneName);
+        SceneManager.LoadScene(startSceneName);
+    }
+
+    private bool ShouldBypassOpeningMenu()
+    {
+        if (SceneDirectControlRouter.ShouldBypassOpeningMenuForScene(gameObject.scene.name))
+        {
+            ConsumeSkipNextOpeningMenu();
+            return true;
+        }
+
+        return ConsumeSkipNextOpeningMenu();
     }
 
     public void ForceCloseForDirectControl()
     {
         gameplayBlocked = false;
-        HideMenu(false);
+        HideMenu(true);
         enabled = false;
     }
 
@@ -167,7 +185,7 @@ public sealed class OpeningMenuController : MonoBehaviour
                 openingCamera.targetTexture = null;
             }
 
-            openingCamera.allowHDR = previousOpeningCameraHdr;
+            GameplayCameraExposureUtility.ApplyGameplayDefaults(openingCamera, true);
             openingCamera.enabled = false;
         }
 
@@ -175,8 +193,8 @@ public sealed class OpeningMenuController : MonoBehaviour
         {
             gameplayBlocked = false;
             ApplyGameplayBlocked(false);
-            Cursor.visible = previousCursorVisible;
-            Cursor.lockState = previousCursorLockMode;
+            Cursor.visible = false;
+            Cursor.lockState = CursorLockMode.Locked;
         }
     }
 
@@ -346,7 +364,7 @@ public sealed class OpeningMenuController : MonoBehaviour
             backgroundTexture.Create();
         }
 
-        openingCamera.allowHDR = false;
+        GameplayCameraExposureUtility.ApplyGameplayDefaults(openingCamera, true);
         openingCamera.targetTexture = backgroundTexture;
     }
 
@@ -418,27 +436,7 @@ public sealed class OpeningMenuController : MonoBehaviour
 
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Opening menu font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

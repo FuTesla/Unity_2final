@@ -2,10 +2,18 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DisallowMultipleComponent]
 public sealed class NpcDialogueController : MonoBehaviour
 {
+    private const string DialogueBoxSpritePath = "Assets/Art/2D/dialoge_box.png";
+    private const string DialogueBoxResourcePath = "UI/dialogue_box";
+    private const string DialogueFontPath = "Assets/Art/Fonts/\u4e1c\u65b9\u5927\u6977.ttf";
+    private const string DefaultQuestTextAfterDialogue = "\u5728\u56ED\u4E2D\u81EA\u7531\u63A2\u7D22";
+
     [Header("Interaction")]
     public KeyCode interactKey = KeyCode.F;
     public float interactDistance = 3.2f;
@@ -15,6 +23,7 @@ public sealed class NpcDialogueController : MonoBehaviour
     [Header("Camera")]
     public IsometricCameraFollow cameraFollow;
     public Camera mainCamera;
+    public bool enableDialogueCameraZoom;
     public float dialogueOrthographicSize = 2.15f;
     public float dialoguePerspectiveFieldOfView = 8f;
     public float cameraTransitionDuration = 0.65f;
@@ -36,7 +45,17 @@ public sealed class NpcDialogueController : MonoBehaviour
         "\u8fd9\u7247\u533a\u57df\u5f88\u5371\u9669\uff0c\u8bf7\u4fdd\u6301\u8b66\u60d5\u3002",
         "\u795d\u4f60\u4e00\u8def\u987a\u5229\u3002"
     };
-    public string questTextAfterDialogue = "\u7EE7\u7EED\u5411\u524D\u63A2\u7D22";
+    public string questTextAfterDialogue = DefaultQuestTextAfterDialogue;
+
+    [Header("Dialogue Style")]
+    public Sprite dialogueBoxSprite;
+    public Font dialogueFont;
+
+    [Header("Dialogue Reward")]
+    public string rewardItemName;
+    public int rewardItemCount;
+    public string rewardItemDescription;
+    public GameObject rewardItemModelPrefab;
 
     private const string DialogueHudName = "Dialogue HUD";
 
@@ -60,6 +79,7 @@ public sealed class NpcDialogueController : MonoBehaviour
     private bool previousCameraWasOrthographic;
     private bool dialogueCompleted;
     private bool questIssued;
+    private bool rewardIssued;
 
     private void Awake()
     {
@@ -137,7 +157,7 @@ public sealed class NpcDialogueController : MonoBehaviour
 
         StopCameraTransition();
 
-        if (mainCamera != null)
+        if (enableDialogueCameraZoom && mainCamera != null)
         {
             previousCameraWasOrthographic = mainCamera.orthographic;
             previousCameraSize = mainCamera.orthographicSize;
@@ -145,11 +165,14 @@ public sealed class NpcDialogueController : MonoBehaviour
             hasCameraSnapshot = true;
         }
 
-        var startFrame = GetCurrentCameraFrame();
-        var dialogueFrame = mainCamera != null && !mainCamera.orthographic
-            ? dialoguePerspectiveFieldOfView
-            : dialogueOrthographicSize;
-        BeginCameraTransition(startFrame, dialogueFrame, cameraTransitionDuration, null);
+        if (enableDialogueCameraZoom)
+        {
+            var startFrame = GetCurrentCameraFrame();
+            var dialogueFrame = mainCamera != null && !mainCamera.orthographic
+                ? dialoguePerspectiveFieldOfView
+                : dialogueOrthographicSize;
+            BeginCameraTransition(startFrame, dialogueFrame, cameraTransitionDuration, null);
+        }
 
         ShowDialogueUi();
         ShowCurrentLine();
@@ -183,15 +206,59 @@ public sealed class NpcDialogueController : MonoBehaviour
             return;
         }
 
-        if (!questIssued && !string.IsNullOrWhiteSpace(questTextAfterDialogue))
+        var questText = GetQuestTextAfterDialogue();
+        if (!questIssued)
         {
-            QuestTrackerUI.ShowQuest(questTextAfterDialogue);
+            if (!string.IsNullOrWhiteSpace(questText))
+            {
+                QuestTrackerUI.ShowQuest(questText);
+            }
+
+            QuestTrackerUI.IssueFamousPavilionsQuest();
             questIssued = true;
         }
 
-        var startFrame = GetCurrentCameraFrame();
-        var returnFrame = previousCameraWasOrthographic ? previousCameraSize : previousCameraFieldOfView;
-        BeginCameraTransition(startFrame, returnFrame, returnCameraTransitionDuration, FinishDialogueReturn);
+        AwardDialogueReward();
+
+        if (enableDialogueCameraZoom)
+        {
+            var startFrame = GetCurrentCameraFrame();
+            var returnFrame = previousCameraWasOrthographic ? previousCameraSize : previousCameraFieldOfView;
+            BeginCameraTransition(startFrame, returnFrame, returnCameraTransitionDuration, FinishDialogueReturn);
+            return;
+        }
+
+        FinishDialogueReturn();
+    }
+
+    private void AwardDialogueReward()
+    {
+        if (rewardIssued || string.IsNullOrWhiteSpace(rewardItemName) || rewardItemCount <= 0)
+        {
+            return;
+        }
+
+        var inventory = playerMotor != null ? playerMotor.GetComponent<PlayerInventoryUI>() : null;
+        if (inventory == null)
+        {
+            inventory = FindObjectOfType<PlayerInventoryUI>();
+        }
+
+        if (inventory == null)
+        {
+            Debug.LogWarning($"NPC dialogue reward '{rewardItemName}' could not be added because no PlayerInventoryUI was found.");
+            return;
+        }
+
+        inventory.AddInventoryItem(rewardItemName, rewardItemCount, rewardItemModelPrefab, rewardItemDescription);
+        rewardIssued = true;
+    }
+
+    private string GetQuestTextAfterDialogue()
+    {
+        return string.IsNullOrWhiteSpace(questTextAfterDialogue)
+            ? DefaultQuestTextAfterDialogue
+            : questTextAfterDialogue.Trim();
     }
 
     private void ShowCurrentLine()
@@ -263,18 +330,18 @@ public sealed class NpcDialogueController : MonoBehaviour
         var root = dialogueHud.GetComponent<RectTransform>();
         Stretch(root);
 
-        var panel = CreateRoundedImage("Dialogue Panel", root, new Color(0.035f, 0.04f, 0.05f, 0.9f));
+        var panel = CreateRoundedImage("Dialogue Panel", root, new Color(1f, 1f, 1f, 0.8f), GetDialogueBoxSprite());
         panel.rectTransform.anchorMin = new Vector2(0.5f, 0f);
         panel.rectTransform.anchorMax = new Vector2(0.5f, 0f);
         panel.rectTransform.pivot = new Vector2(0.5f, 0f);
-        panel.rectTransform.anchoredPosition = new Vector2(0f, 95f);
-        panel.rectTransform.sizeDelta = new Vector2(1320f, 190f);
+        panel.rectTransform.anchoredPosition = new Vector2(0f, 82f);
+        panel.rectTransform.sizeDelta = new Vector2(1260f, 305f);
 
-        dialogueText = CreateText("NPC Dialogue Text", panel.rectTransform, string.Empty, 31, FontStyle.Normal, Color.white);
+        dialogueText = CreateText("NPC Dialogue Text", panel.rectTransform, string.Empty, 34, FontStyle.Normal, Color.black, GetDialogueFont());
         dialogueText.rectTransform.anchorMin = Vector2.zero;
         dialogueText.rectTransform.anchorMax = Vector2.one;
-        dialogueText.rectTransform.offsetMin = new Vector2(44f, 30f);
-        dialogueText.rectTransform.offsetMax = new Vector2(-44f, -30f);
+        dialogueText.rectTransform.offsetMin = new Vector2(140f, 68f);
+        dialogueText.rectTransform.offsetMax = new Vector2(-140f, -64f);
         dialogueText.alignment = TextAnchor.MiddleCenter;
     }
 
@@ -576,24 +643,26 @@ public sealed class NpcDialogueController : MonoBehaviour
         return image;
     }
 
-    private static Image CreateRoundedImage(string objectName, Transform parent, Color color)
+    private static Image CreateRoundedImage(string objectName, Transform parent, Color color, Sprite spriteOverride = null)
     {
         var image = CreateImage(objectName, parent, color);
-        image.sprite = GetRoundedRectSprite();
-        image.type = Image.Type.Sliced;
+        image.sprite = spriteOverride != null ? spriteOverride : GetRoundedRectSprite();
+        image.type = image.sprite != null && image.sprite.border != Vector4.zero
+            ? Image.Type.Sliced
+            : Image.Type.Simple;
         image.pixelsPerUnitMultiplier = 1f;
         image.material = Graphic.defaultGraphicMaterial;
         return image;
     }
 
-    private static Text CreateText(string objectName, Transform parent, string value, int fontSize, FontStyle style, Color color)
+    private static Text CreateText(string objectName, Transform parent, string value, int fontSize, FontStyle style, Color color, Font fontOverride = null)
     {
         var obj = new GameObject(objectName, typeof(RectTransform), typeof(Text));
         obj.transform.SetParent(parent, false);
 
         var text = obj.GetComponent<Text>();
         text.text = value;
-        text.font = GetReadableFont();
+        text.font = fontOverride != null ? fontOverride : GetReadableFont();
         text.fontSize = fontSize;
         text.fontStyle = style;
         text.color = color;
@@ -611,29 +680,60 @@ public sealed class NpcDialogueController : MonoBehaviour
         return text;
     }
 
+    private Sprite GetDialogueBoxSprite()
+    {
+        if (dialogueBoxSprite != null)
+        {
+            return dialogueBoxSprite;
+        }
+
+#if UNITY_EDITOR
+        dialogueBoxSprite = AssetDatabase.LoadAssetAtPath<Sprite>(DialogueBoxSpritePath);
+#endif
+        if (dialogueBoxSprite != null)
+        {
+            return dialogueBoxSprite;
+        }
+
+        dialogueBoxSprite = Resources.Load<Sprite>(DialogueBoxResourcePath);
+        if (dialogueBoxSprite != null)
+        {
+            return dialogueBoxSprite;
+        }
+
+        var texture = Resources.Load<Texture2D>(DialogueBoxResourcePath);
+        if (texture != null)
+        {
+            const float border = 96f;
+            dialogueBoxSprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f),
+                100f,
+                0,
+                SpriteMeshType.FullRect,
+                new Vector4(border, border, border, border));
+        }
+
+        return dialogueBoxSprite;
+    }
+
+    private Font GetDialogueFont()
+    {
+        if (dialogueFont != null)
+        {
+            return dialogueFont;
+        }
+
+#if UNITY_EDITOR
+        dialogueFont = AssetDatabase.LoadAssetAtPath<Font>(DialogueFontPath);
+#endif
+        return dialogueFont != null ? dialogueFont : GetReadableFont();
+    }
+
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"NPC dialogue font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

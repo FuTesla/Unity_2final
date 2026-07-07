@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -7,8 +8,26 @@ public sealed class QuestTrackerUI : MonoBehaviour
 {
     private const string CanvasName = "Quest Tracker HUD";
     private const string PanelName = "Quest Tracker Panel";
+    private const string LevelTwoSceneName = "Lvl_2";
+    private const string TaorantingTriggerObjectName = "T_taoranting";
+    private const string TuitaiTriggerObjectName = "T_tuitai";
+    private const string AiwantingTriggerObjectName = "T_aiwanting";
+    private const string FriedEggRewardItemName = "\u714E\u86CB";
+    public const string LevelTwoFragmentQuestText = "\u6536\u96C625\u4E2A\u6B8B\u9875";
+    public const string FamousPavilionsQuestText = "\u63A2\u5BFB\u516C\u56ED\u91CC\u7684\u4E09\u5EA7\u540D\u4EAD\uFF08\u53EF\u9009\uFF09";
 
     private static QuestTrackerUI instance;
+    private static string storedActiveQuestText = string.Empty;
+    private static string storedCompletionText = string.Empty;
+    private static bool storedIsCompleted;
+    private static bool completionPopupPendingOnSceneLoad;
+    private static int lastQuestRestoreSceneHandle = int.MinValue;
+    private static bool famousPavilionsQuestIssued;
+    private static bool famousPavilionsQuestCompleted;
+    private static bool famousPavilionsRewardIssued;
+    private static bool visitedTaoranting;
+    private static bool visitedTuitai;
+    private static bool visitedAiwanting;
 
     private GameObject canvasObject;
     private Image panelImage;
@@ -27,9 +46,50 @@ public sealed class QuestTrackerUI : MonoBehaviour
     private static readonly Vector2 VisiblePanelPosition = new Vector2(36f, -34f);
     private static readonly Vector2 HiddenPanelPosition = new Vector2(-460f, -34f);
 
-    public static bool HasActiveQuest => instance != null && !string.IsNullOrEmpty(instance.activeQuestText);
-    public static string CurrentQuestText => instance != null ? instance.activeQuestText : string.Empty;
-    public static bool IsCompleted => instance != null && instance.isCompleted;
+    public static bool HasActiveQuest => !string.IsNullOrEmpty(storedActiveQuestText);
+    public static string CurrentQuestText => storedActiveQuestText;
+    public static bool IsCompleted => storedIsCompleted;
+    public static bool HasFamousPavilionsQuest => famousPavilionsQuestIssued;
+    public static bool IsFamousPavilionsQuestCompleted => famousPavilionsQuestCompleted;
+    public static int FamousPavilionsVisitedCount => GetFamousPavilionsVisitedCount();
+
+    public static void IssueFamousPavilionsQuest()
+    {
+        if (famousPavilionsQuestCompleted)
+        {
+            return;
+        }
+
+        famousPavilionsQuestIssued = true;
+        TryCompleteFamousPavilionsQuest();
+    }
+
+    public static void RegisterFamousPavilionVisit(string triggerObjectName)
+    {
+        if (string.IsNullOrWhiteSpace(triggerObjectName))
+        {
+            return;
+        }
+
+        if (string.Equals(triggerObjectName, TaorantingTriggerObjectName, System.StringComparison.Ordinal))
+        {
+            visitedTaoranting = true;
+        }
+        else if (string.Equals(triggerObjectName, TuitaiTriggerObjectName, System.StringComparison.Ordinal))
+        {
+            visitedTuitai = true;
+        }
+        else if (string.Equals(triggerObjectName, AiwantingTriggerObjectName, System.StringComparison.Ordinal))
+        {
+            visitedAiwanting = true;
+        }
+        else
+        {
+            return;
+        }
+
+        TryCompleteFamousPavilionsQuest();
+    }
 
     public static void ShowQuest(string questMessage)
     {
@@ -39,9 +99,11 @@ public sealed class QuestTrackerUI : MonoBehaviour
         }
 
         EnsureInstance();
-        instance.activeQuestText = questMessage;
-        instance.completionText = string.Empty;
-        instance.isCompleted = false;
+        storedActiveQuestText = NormalizeQuestTitle(questMessage);
+        storedCompletionText = string.Empty;
+        storedIsCompleted = false;
+        completionPopupPendingOnSceneLoad = false;
+        instance.ApplyStoredState();
         instance.StopSlideRoutine();
         instance.Refresh();
         instance.ResetPanelPosition();
@@ -49,17 +111,40 @@ public sealed class QuestTrackerUI : MonoBehaviour
 
     public static void CompleteQuest(string completionSuffix)
     {
-        if (instance == null || string.IsNullOrWhiteSpace(instance.activeQuestText))
+        if (!HasActiveQuest)
         {
             return;
         }
 
-        instance.activeQuestText = instance.activeQuestText.Split('\n')[0].Trim();
-        instance.isCompleted = true;
-        instance.completionText = completionSuffix ?? string.Empty;
+        storedActiveQuestText = NormalizeQuestTitle(storedActiveQuestText);
+        storedIsCompleted = true;
+        storedCompletionText = completionSuffix ?? string.Empty;
+        completionPopupPendingOnSceneLoad = false;
 
+        EnsureInstance();
+        instance.ApplyStoredState();
         instance.Refresh();
         instance.BeginCompletedSlideOut();
+    }
+
+    public static bool CompleteQuestForSceneTransition(string completionSuffix)
+    {
+        if (!HasActiveQuest)
+        {
+            return false;
+        }
+
+        storedActiveQuestText = NormalizeQuestTitle(storedActiveQuestText);
+        storedIsCompleted = true;
+        storedCompletionText = completionSuffix ?? string.Empty;
+        completionPopupPendingOnSceneLoad = true;
+
+        if (instance != null)
+        {
+            instance.ApplyStoredState();
+        }
+
+        return true;
     }
 
     public static void ShowCompletedQuest(string questMessage, string completionSuffix)
@@ -70,11 +155,150 @@ public sealed class QuestTrackerUI : MonoBehaviour
         }
 
         EnsureInstance();
-        instance.activeQuestText = questMessage.Split('\n')[0].Trim();
-        instance.completionText = completionSuffix ?? string.Empty;
-        instance.isCompleted = true;
+        storedActiveQuestText = NormalizeQuestTitle(questMessage);
+        storedCompletionText = completionSuffix ?? string.Empty;
+        storedIsCompleted = true;
+        completionPopupPendingOnSceneLoad = false;
+        instance.ApplyStoredState();
         instance.Refresh();
         instance.BeginCompletedSlideOut();
+    }
+
+    public static bool IsCurrentQuest(string questText)
+    {
+        return HasActiveQuest
+            && string.Equals(
+                NormalizeQuestTitle(storedActiveQuestText),
+                NormalizeQuestTitle(questText),
+                System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void TryCompleteFamousPavilionsQuest()
+    {
+        if (!famousPavilionsQuestIssued
+            || famousPavilionsQuestCompleted
+            || GetFamousPavilionsVisitedCount() < 3)
+        {
+            return;
+        }
+
+        famousPavilionsQuestCompleted = true;
+        AwardFamousPavilionsReward();
+    }
+
+    private static int GetFamousPavilionsVisitedCount()
+    {
+        var count = 0;
+        if (visitedTaoranting)
+        {
+            count++;
+        }
+
+        if (visitedTuitai)
+        {
+            count++;
+        }
+
+        if (visitedAiwanting)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private static void AwardFamousPavilionsReward()
+    {
+        if (famousPavilionsRewardIssued)
+        {
+            return;
+        }
+
+        var player = FindObjectOfType<TopDownCharacterMotor>();
+        var inventory = player != null ? player.GetComponent<PlayerInventoryUI>() : null;
+        if (inventory == null)
+        {
+            inventory = FindObjectOfType<PlayerInventoryUI>();
+        }
+
+        if (inventory == null)
+        {
+            Debug.LogWarning("Famous pavilions quest reward could not be added because no PlayerInventoryUI was found.");
+            return;
+        }
+
+        inventory.AddInventoryItem(FriedEggRewardItemName, 1, null);
+        famousPavilionsRewardIssued = true;
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void BootstrapSceneQuestRestore()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    private static void RestoreInitialVisibleQuestAfterSceneLoad()
+    {
+        RestoreVisibleQuestAfterSceneLoad();
+    }
+
+    private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        RestoreVisibleQuestAfterSceneLoad();
+    }
+
+    private static void RestoreVisibleQuestAfterSceneLoad()
+    {
+        var activeScene = SceneManager.GetActiveScene();
+        if (activeScene.handle == lastQuestRestoreSceneHandle)
+        {
+            return;
+        }
+
+        lastQuestRestoreSceneHandle = activeScene.handle;
+        var shouldIssueLevelTwoQuest = ShouldIssueLevelTwoFragmentQuest(activeScene);
+        if (!HasActiveQuest || (storedIsCompleted && !completionPopupPendingOnSceneLoad))
+        {
+            if (shouldIssueLevelTwoQuest)
+            {
+                ShowQuest(LevelTwoFragmentQuestText);
+            }
+
+            return;
+        }
+
+        EnsureInstance();
+        instance.ApplyStoredState();
+        instance.StopSlideRoutine();
+        instance.Refresh();
+
+        if (storedIsCompleted && completionPopupPendingOnSceneLoad)
+        {
+            completionPopupPendingOnSceneLoad = false;
+            instance.BeginCompletedSlideOut();
+            if (shouldIssueLevelTwoQuest)
+            {
+                instance.StartCoroutine(instance.ShowLevelTwoQuestAfterDelay());
+            }
+
+            return;
+        }
+
+        if (shouldIssueLevelTwoQuest)
+        {
+            ShowQuest(LevelTwoFragmentQuestText);
+            return;
+        }
+
+        instance.ResetPanelPosition();
+    }
+
+    private static bool ShouldIssueLevelTwoFragmentQuest(Scene activeScene)
+    {
+        return string.Equals(activeScene.name, LevelTwoSceneName, System.StringComparison.OrdinalIgnoreCase)
+            && !IsCurrentQuest(LevelTwoFragmentQuestText);
     }
 
     private static void EnsureInstance()
@@ -89,12 +313,14 @@ public sealed class QuestTrackerUI : MonoBehaviour
         {
             instance = existing;
             instance.EnsureUi();
+            instance.ApplyStoredState();
             return;
         }
 
         var host = new GameObject("QuestTrackerUI");
         instance = host.AddComponent<QuestTrackerUI>();
         instance.EnsureUi();
+        instance.ApplyStoredState();
     }
 
     private void Awake()
@@ -107,6 +333,7 @@ public sealed class QuestTrackerUI : MonoBehaviour
 
         instance = this;
         EnsureUi();
+        ApplyStoredState();
         Refresh();
     }
 
@@ -246,6 +473,12 @@ public sealed class QuestTrackerUI : MonoBehaviour
         slideRoutine = null;
     }
 
+    private IEnumerator ShowLevelTwoQuestAfterDelay()
+    {
+        yield return new WaitForSecondsRealtime(1.85f);
+        ShowQuest(LevelTwoFragmentQuestText);
+    }
+
     private void ResetPanelPosition()
     {
         if (canvasObject != null && !canvasObject.activeSelf)
@@ -281,6 +514,13 @@ public sealed class QuestTrackerUI : MonoBehaviour
         ResolveObjectiveZone();
 
         if (playerMotor == null || objectiveTransform == null)
+        {
+            return false;
+        }
+
+        if (objectiveZone != null
+            && !string.IsNullOrWhiteSpace(objectiveZone.requiredQuestText)
+            && !IsCurrentQuest(objectiveZone.requiredQuestText))
         {
             return false;
         }
@@ -379,6 +619,23 @@ public sealed class QuestTrackerUI : MonoBehaviour
         return null;
     }
 
+    private void ApplyStoredState()
+    {
+        activeQuestText = storedActiveQuestText;
+        completionText = storedCompletionText;
+        isCompleted = storedIsCompleted;
+    }
+
+    private static string NormalizeQuestTitle(string questText)
+    {
+        if (string.IsNullOrWhiteSpace(questText))
+        {
+            return string.Empty;
+        }
+
+        return questText.Split('\n')[0].Trim();
+    }
+
     private static Image CreateRoundedImage(string objectName, Transform parent, Color color)
     {
         var obj = new GameObject(objectName, typeof(RectTransform), typeof(Image));
@@ -411,27 +668,7 @@ public sealed class QuestTrackerUI : MonoBehaviour
 
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Quest tracker font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 

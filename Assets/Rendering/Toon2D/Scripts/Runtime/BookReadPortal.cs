@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -6,6 +7,8 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public sealed class BookReadPortal : MonoBehaviour
 {
+    private static readonly Vector3 LevelOneReturnSpawnPosition = new Vector3(175f, 10f, 105f);
+
     public Transform bookTarget;
     public string targetSceneName = "Lvl_1";
     public KeyCode interactKey = KeyCode.F;
@@ -13,9 +16,19 @@ public sealed class BookReadPortal : MonoBehaviour
     public Vector3 promptWorldOffset = new Vector3(1.15f, 0.75f, 0f);
     public Vector2 promptSize = new Vector2(220f, 50f);
     public string promptText = "\u6309\u4e0bF\u9605\u8bfb";
+    public bool completeQuestWhenLoadingLevelTwo = true;
+    public string levelTwoQuestCompletionText = "\u4EFB\u52A1\u5B8C\u6210";
+    public bool requireFragmentsForLevelOneReturn = true;
+    public string requiredFragmentItemName = PlayerInventoryUI.TaorantingAlbumItemName;
+    public int requiredFragmentCount = 25;
+    public string insufficientFragmentsMessage = "\u6B8B\u9875\u4E0D\u8DB3";
+    public KeyCode backdoorKey = KeyCode.R;
+    public float backdoorInputWindow = 6f;
 
     private const string CanvasName = "Book Read Prompt HUD";
     private const string PromptName = "Book Read Prompt";
+    private const string NoticeCanvasName = "Book Requirement Notice HUD";
+    private const string NoticeTextName = "Book Requirement Notice Text";
 
     private static Font readableFont;
     private static Sprite promptSprite;
@@ -24,6 +37,10 @@ public sealed class BookReadPortal : MonoBehaviour
     private Camera mainCamera;
     private GameObject promptRoot;
     private RectTransform promptRect;
+    private Text requirementNoticeText;
+    private CanvasGroup requirementNoticeCanvasGroup;
+    private Coroutine requirementNoticeRoutine;
+    private float backdoorArmedUntil = -1f;
 
     private void Awake()
     {
@@ -49,10 +66,27 @@ public sealed class BookReadPortal : MonoBehaviour
             UpdatePromptPosition();
         }
 
+        if (inRange
+            && RequiresFragmentsForTargetScene()
+            && Time.unscaledTime <= backdoorArmedUntil
+            && Input.GetKeyDown(backdoorKey))
+        {
+            backdoorArmedUntil = -1f;
+            TeleportToTargetScene(false);
+            return;
+        }
+
         if (inRange && Input.GetKeyDown(interactKey))
         {
-            SceneDirectControlRouter.RequestDirectControl(targetSceneName);
-            SceneManager.LoadScene(targetSceneName);
+            if (RequiresFragmentsForTargetScene() && !HasRequiredFragments())
+            {
+                ArmBackdoorInput();
+                ShowRequirementNotice();
+                return;
+            }
+
+            backdoorArmedUntil = -1f;
+            TeleportToTargetScene(true);
         }
     }
 
@@ -86,6 +120,55 @@ public sealed class BookReadPortal : MonoBehaviour
         playerPosition.y = 0f;
         bookPosition.y = 0f;
         return (playerPosition - bookPosition).sqrMagnitude <= interactDistance * interactDistance;
+    }
+
+    private bool RequiresFragmentsForTargetScene()
+    {
+        return requireFragmentsForLevelOneReturn
+            && string.Equals(targetSceneName, "Lvl_1", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool HasRequiredFragments()
+    {
+        var inventory = playerMotor != null ? playerMotor.GetComponent<PlayerInventoryUI>() : null;
+        if (inventory == null)
+        {
+            inventory = FindObjectOfType<PlayerInventoryUI>();
+        }
+
+        return inventory != null
+            && inventory.GetInventoryItemCount(requiredFragmentItemName) >= Mathf.Max(1, requiredFragmentCount);
+    }
+
+    private void ArmBackdoorInput()
+    {
+        backdoorArmedUntil = Time.unscaledTime + Mathf.Max(0.1f, backdoorInputWindow);
+    }
+
+    private void TeleportToTargetScene(bool completeQuestIfRequired)
+    {
+        if (completeQuestIfRequired && RequiresFragmentsForTargetScene())
+        {
+            QuestTrackerUI.ShowCompletedQuest(QuestTrackerUI.LevelTwoFragmentQuestText, levelTwoQuestCompletionText);
+        }
+
+        if (completeQuestIfRequired
+            && completeQuestWhenLoadingLevelTwo
+            && string.Equals(targetSceneName, "Lvl_2", System.StringComparison.OrdinalIgnoreCase))
+        {
+            QuestTrackerUI.CompleteQuestForSceneTransition(levelTwoQuestCompletionText);
+        }
+
+        if (string.Equals(targetSceneName, "Lvl_1", System.StringComparison.OrdinalIgnoreCase))
+        {
+            SceneDirectControlRouter.RequestDirectControl(targetSceneName, LevelOneReturnSpawnPosition);
+        }
+        else
+        {
+            SceneDirectControlRouter.RequestDirectControl(targetSceneName);
+        }
+
+        SceneManager.LoadScene(targetSceneName);
     }
 
     private void UpdatePrompt()
@@ -199,29 +282,106 @@ public sealed class BookReadPortal : MonoBehaviour
         }
     }
 
+    private void ShowRequirementNotice()
+    {
+        EnsureRequirementNoticeUi();
+        if (requirementNoticeText == null || requirementNoticeCanvasGroup == null)
+        {
+            return;
+        }
+
+        requirementNoticeText.text = insufficientFragmentsMessage;
+        requirementNoticeCanvasGroup.alpha = 1f;
+        requirementNoticeCanvasGroup.gameObject.SetActive(true);
+
+        if (requirementNoticeRoutine != null)
+        {
+            StopCoroutine(requirementNoticeRoutine);
+        }
+
+        requirementNoticeRoutine = StartCoroutine(HideRequirementNoticeAfterDelay());
+    }
+
+    private void EnsureRequirementNoticeUi()
+    {
+        if (requirementNoticeText != null && requirementNoticeCanvasGroup != null)
+        {
+            return;
+        }
+
+        var canvasObject = GameObject.Find(NoticeCanvasName);
+        if (canvasObject == null)
+        {
+            canvasObject = new GameObject(NoticeCanvasName, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(CanvasGroup));
+            var canvas = canvasObject.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = 235;
+
+            var scaler = canvasObject.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+        }
+
+        requirementNoticeCanvasGroup = canvasObject.GetComponent<CanvasGroup>();
+        requirementNoticeCanvasGroup.interactable = false;
+        requirementNoticeCanvasGroup.blocksRaycasts = false;
+
+        var textTransform = canvasObject.transform.Find(NoticeTextName);
+        if (textTransform != null)
+        {
+            requirementNoticeText = textTransform.GetComponent<Text>();
+        }
+
+        if (requirementNoticeText == null)
+        {
+            var label = new GameObject(NoticeTextName, typeof(RectTransform), typeof(Text));
+            label.transform.SetParent(canvasObject.transform, false);
+            requirementNoticeText = label.GetComponent<Text>();
+
+            var outline = requirementNoticeText.gameObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0f, 0f, 0f, 0.78f);
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
+        }
+
+        requirementNoticeText.alignment = TextAnchor.MiddleLeft;
+        requirementNoticeText.font = GetReadableFont();
+        requirementNoticeText.fontSize = 30;
+        requirementNoticeText.fontStyle = FontStyle.Bold;
+        requirementNoticeText.color = new Color(1f, 0.86f, 0.45f, 1f);
+        requirementNoticeText.material = Graphic.defaultGraphicMaterial;
+        requirementNoticeText.raycastTarget = false;
+        requirementNoticeText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        requirementNoticeText.verticalOverflow = VerticalWrapMode.Overflow;
+
+        var rect = requirementNoticeText.rectTransform;
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(36f, -118f);
+        rect.sizeDelta = new Vector2(420f, 58f);
+
+        requirementNoticeCanvasGroup.gameObject.SetActive(false);
+    }
+
+    private IEnumerator HideRequirementNoticeAfterDelay()
+    {
+        yield return new WaitForSecondsRealtime(2.2f);
+
+        if (requirementNoticeCanvasGroup != null)
+        {
+            requirementNoticeCanvasGroup.alpha = 0f;
+            requirementNoticeCanvasGroup.gameObject.SetActive(false);
+        }
+
+        requirementNoticeRoutine = null;
+    }
+
     private static Font GetReadableFont()
     {
-        if (readableFont != null)
-        {
-            return readableFont;
-        }
-
-        try
-        {
-            readableFont = Font.CreateDynamicFontFromOSFont(
-                new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial" },
-                24);
-        }
-        catch (System.Exception exception)
-        {
-            Debug.LogWarning($"Book read prompt font lookup failed: {exception.Message}");
-        }
-
-        if (readableFont == null)
-        {
-            readableFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
+        readableFont = GameFontUtility.GetUIFont();
         return readableFont;
     }
 
